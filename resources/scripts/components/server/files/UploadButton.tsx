@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { useEffect, useRef, useState } from 'react';
 import getFileUploadUrl from '@/api/server/files/getFileUploadUrl';
+import createDirectory from '@/api/server/files/createDirectory';
 import { ModalMask } from '@/components/elements/Modal';
 import FadeTransition from '@/components/elements/transitions/FadeTransition';
 import { Button } from '@/components/ui/button';
@@ -19,6 +20,7 @@ function isFileOrDirectory(event: DragEvent): boolean {
 
 const UploadButton = () => {
     const fileUploadInput = useRef<HTMLInputElement>(null);
+    const folderUploadInput = useRef<HTMLInputElement>(null);
     const [timeouts, _] = useState<NodeJS.Timeout[]>([]);
     const [visible, setVisible] = useState(false);
     const { mutate } = useFileManagerSwr();
@@ -53,42 +55,103 @@ const UploadButton = () => {
         return () => timeouts.forEach(clearTimeout);
     }, [timeouts.forEach]);
 
-    const onFileSubmission = (files: FileList) => {
+    const getRelativePath = (file: File): string =>
+        (file.webkitRelativePath || file.name).replace(/\\/g, '/');
+
+    const getRelativeDirectory = (file: File): string => {
+        const relativePath = getRelativePath(file);
+        const index = relativePath.lastIndexOf('/');
+
+        return index === -1 ? '' : relativePath.substring(0, index);
+    };
+
+    const resolveUploadDirectory = (relativeDirectory: string): string => {
+        if (!relativeDirectory) return directory;
+
+        const root = directory.replace(/\/+$/, '');
+        const child = relativeDirectory.replace(/^\/+|\/+$/g, '');
+
+        return `${root}/${child}` || '/';
+    };
+
+    const onFileSubmission = async (files: FileList) => {
         clearAndAddHttpError();
+
         const list = Array.from(files);
-        if (list.some((file) => !file.size || (!file.type && file.size === 4096))) {
-            return addError('Folder uploads are not supported at this time.', 'Error');
+        if (!list.length) return;
+
+        try {
+            //
+            // Folder uploads expose paths through webkitRelativePath.
+            // Wings uses mkdirAll internally, so existing directories are
+            // naturally merged rather than treated as an error.
+            //
+            const directories = Array.from(
+                new Set(
+                    list
+                        .map((file) => getRelativeDirectory(file))
+                        .filter((path): path is string => path.length > 0),
+                ),
+            ).sort((a, b) => a.split('/').length - b.split('/').length);
+
+            for (const path of directories) {
+                await createDirectory(uuid, directory, path);
+            }
+
+            //
+            // Keep uploads bounded instead of firing hundreds of requests
+            // simultaneously for a large plugin/server folder.
+            //
+            const queue = [...list];
+
+            const worker = async () => {
+                while (queue.length > 0) {
+                    const file = queue.shift();
+                    if (!file) return;
+
+                    const relativePath = getRelativePath(file);
+                    const relativeDirectory = getRelativeDirectory(file);
+                    const uploadDirectory = resolveUploadDirectory(relativeDirectory);
+
+                    const controller = new AbortController();
+
+                    pushFileUpload({
+                        name: relativePath,
+                        data: {
+                            abort: controller,
+                            loaded: 0,
+                            total: file.size,
+                        },
+                    });
+
+                    const url = await getFileUploadUrl(uuid);
+
+                    await axios.post(
+                        url,
+                        { files: file },
+                        {
+                            signal: controller.signal,
+                            headers: { 'Content-Type': 'multipart/form-data' },
+                            params: { directory: uploadDirectory },
+                        },
+                    );
+
+                    timeouts.push(
+                        setTimeout(() => removeFileUpload(relativePath), 500),
+                    );
+                }
+            };
+
+            const concurrency = Math.min(6, list.length);
+            await Promise.all(
+                Array.from({ length: concurrency }, () => worker()),
+            );
+
+            await mutate();
+        } catch (error) {
+            clearFileUploads();
+            clearAndAddHttpError(error);
         }
-
-        const uploads = list.map((file) => {
-            const controller = new AbortController();
-            pushFileUpload({
-                name: file.name,
-                data: { abort: controller, loaded: 0, total: file.size },
-            });
-
-            return () =>
-                getFileUploadUrl(uuid).then((url) =>
-                    axios
-                        .post(
-                            url,
-                            { files: file },
-                            {
-                                signal: controller.signal,
-                                headers: { 'Content-Type': 'multipart/form-data' },
-                                params: { directory },
-                            },
-                        )
-                        .then(() => timeouts.push(setTimeout(() => removeFileUpload(file.name), 500))),
-                );
-        });
-
-        Promise.all(uploads.map((fn) => fn()))
-            .then(() => mutate())
-            .catch((error) => {
-                clearFileUploads();
-                clearAndAddHttpError(error);
-            });
     };
 
     return (
@@ -157,15 +220,37 @@ const UploadButton = () => {
                 onChange={(e) => {
                     if (!e.currentTarget.files) return;
 
-                    onFileSubmission(e.currentTarget.files);
+                    void onFileSubmission(e.currentTarget.files);
                     if (fileUploadInput.current) {
                         fileUploadInput.current.files = null;
                     }
                 }}
                 multiple
             />
+            <input
+                type='file'
+                ref={(element) => {
+                    folderUploadInput.current = element;
+
+                    if (element) {
+                        element.setAttribute('webkitdirectory', '');
+                        element.setAttribute('directory', '');
+                    }
+                }}
+                className='hidden'
+                onChange={(e) => {
+                    if (!e.currentTarget.files?.length) return;
+
+                    void onFileSubmission(e.currentTarget.files);
+                    e.currentTarget.value = '';
+                }}
+                multiple
+            />
             <Button variant='secondary' onClick={() => fileUploadInput.current?.click()}>
                 Upload
+            </Button>
+            <Button variant='secondary' onClick={() => folderUploadInput.current?.click()}>
+                Upload Folder
             </Button>
         </>
     );
