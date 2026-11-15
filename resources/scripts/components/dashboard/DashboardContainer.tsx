@@ -1,5 +1,6 @@
+import { Grip, Server as ServerIcon, Xmark } from '@gravity-ui/icons';
 import { useStoreState } from 'easy-peasy';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import useSWR from 'swr';
 import useSWRImmutable from 'swr/immutable';
@@ -23,6 +24,7 @@ import PageContentBlock from '@/components/elements/PageContentBlock';
 import Pagination from '@/components/elements/Pagination';
 import { Tabs, TabsList, TabsTrigger } from '@/components/elements/Tabs';
 import { useHeader } from '@/contexts/HeaderContext';
+import { useTranslation } from '@/i18n/I18nProvider';
 
 import useFlash from '@/plugins/useFlash';
 import { usePersistedState } from '@/plugins/usePersistedState';
@@ -34,29 +36,16 @@ import OwnerFilterDropdown, { type OwnerFilterValue } from './header/OwnerFilter
 import SearchSection from './header/SearchSection';
 import SortDropdown, { type SortPreset } from './header/SortDropdown';
 
-const SORT_PRESETS: SortPreset[] = [
-    { value: 'name', label: 'A → Z' },
-    { value: '-name', label: 'Z → A' },
-    { value: 'created_at', label: 'Oldest → Newest' },
-    { value: '-created_at', label: 'Newest → Oldest' },
-    { value: 'status', label: 'Status ▲' },
-    { value: '-status', label: 'Status ▼' },
-    { value: 'memory', label: 'Memory ↑' },
-    { value: '-memory', label: 'Memory ↓' },
-    { value: 'disk', label: 'Disk ↑' },
-    { value: '-disk', label: 'Disk ↓' },
-    { value: 'cpu', label: 'CPU ↑' },
-    { value: '-cpu', label: 'CPU ↓' },
-];
-
 type FilterCategory = 'owner_id' | 'nest_id' | 'egg_id' | 'node_id';
 type DashboardMode = 'list' | 'grid' | 'groups';
 
 const DashboardContainer = () => {
+    const { t } = useTranslation();
     const { search } = useLocation();
     const defaultPage = Number(new URLSearchParams(search).get('page') || '1');
 
     const [page, setPage] = useState(!Number.isNaN(defaultPage) && defaultPage > 0 ? defaultPage : 1);
+    const pageScrollRef = useRef<HTMLDivElement>(null);
     const { clearFlashes, clearAndAddHttpError } = useFlash();
     const uuid = useStoreState((state) => state.user.data?.uuid);
     const rootAdmin = useStoreState((state) => state.user.data?.rootAdmin);
@@ -71,6 +60,18 @@ const DashboardContainer = () => {
     const [filterField, setFilterField] = useState<FilterCategory | undefined>(undefined);
     const [filterValue, setFilterValue] = useState<number | undefined>(undefined);
     const [groupFilterId, setGroupFilterId] = useState<number | undefined>(undefined);
+
+    const sortPresets = useMemo<SortPreset[]>(
+        () => [
+            { value: 'name', label: t('dashboard.sort.name') },
+            { value: 'created_at', label: t('dashboard.sort.created_at') },
+            { value: 'status', label: t('dashboard.sort.status') },
+            { value: 'memory', label: t('dashboard.sort.memory') },
+            { value: 'disk', label: t('dashboard.sort.disk') },
+            { value: 'cpu', label: t('dashboard.sort.cpu') },
+        ],
+        [t],
+    );
 
     const filterActive = searchQuery.trim() !== '' || filterField !== undefined || groupFilterId !== undefined;
 
@@ -101,6 +102,12 @@ const DashboardContainer = () => {
         { revalidateOnFocus: false },
     );
 
+    const [customOrder, setCustomOrder] = usePersistedState<string[]>(`${uuid}:custom_server_order`, []);
+    const [draggingServerId, setDraggingServerId] = useState<string | null>(null);
+    const [dragOverServerId, setDragOverServerId] = useState<string | null>(null);
+    const previewRef = useRef<HTMLDivElement>(null);
+    const previewNameRef = useRef<HTMLSpanElement>(null);
+
     const handleSortChange = useCallback((value: string) => {
         setSortValue(value);
         setPage(1);
@@ -112,6 +119,57 @@ const DashboardContainer = () => {
             setPage(1);
         },
         [setOwnerFilter],
+    );
+
+    const handleDragStart = useCallback((event: React.DragEvent, server: Server) => {
+        event.dataTransfer.setData('text/plain', server.id);
+        event.dataTransfer.effectAllowed = 'move';
+        setDraggingServerId(server.id);
+
+        const preview = previewRef.current;
+        if (preview && previewNameRef.current) {
+            previewNameRef.current.textContent = server.name;
+            event.dataTransfer.setDragImage(preview, 24, 24);
+        }
+    }, []);
+
+    const handleDragEnd = useCallback(() => {
+        setDraggingServerId(null);
+        setDragOverServerId(null);
+    }, []);
+
+    const handleDragOver = useCallback((event: React.DragEvent, serverId: string) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        setDragOverServerId(serverId);
+    }, []);
+
+    const handleDragLeave = useCallback((serverId: string) => {
+        setDragOverServerId((prev) => (prev === serverId ? null : prev));
+    }, []);
+
+    const handleDrop = useCallback(
+        (event: React.DragEvent, targetServer: Server, currentItems: Server[]) => {
+            event.preventDefault();
+            setDragOverServerId(null);
+            const sourceServerId = event.dataTransfer.getData('text/plain');
+            if (!sourceServerId || sourceServerId === targetServer.id) return;
+
+            const currentOrder = currentItems.map((s) => s.id);
+            const sourceIndex = currentOrder.indexOf(sourceServerId);
+            const targetIndex = currentOrder.indexOf(targetServer.id);
+
+            if (sourceIndex === -1 || targetIndex === -1) return;
+
+            const newOrder = [...currentOrder];
+            const [movedItem] = newOrder.splice(sourceIndex, 1);
+            newOrder.splice(targetIndex, 0, movedItem);
+
+            // Merge with any known customOrder for servers not currently on this page
+            const existingNonPage = (customOrder || []).filter((id) => !currentOrder.includes(id));
+            setCustomOrder([...newOrder, ...existingNonPage]);
+        },
+        [customOrder, setCustomOrder],
     );
 
     const handleFilterChange = useCallback((field: FilterCategory | undefined, value: number | undefined) => {
@@ -130,20 +188,25 @@ const DashboardContainer = () => {
         setPage(1);
     }, []);
 
+    const clearFilters = useCallback(() => {
+        setSearchQuery('');
+        setFilterField(undefined);
+        setFilterValue(undefined);
+        setGroupFilterId(undefined);
+        setSortValue('');
+        setPage(1);
+    }, []);
+
     const searchSection = useMemo(
-        () => <SearchSection className='max-w-360 hidden md:flex' onSearch={handleSearch} />,
+        () => <SearchSection className='max-w-260 min-w-[220px] hidden xl:flex' onSearch={handleSearch} />,
         [handleSearch],
     );
 
     const viewTabs = useMemo(
         () => (
-            <Tabs
-                value={dashboardMode}
-                onValueChange={(v) => setDashboardMode(v as DashboardMode)}
-                className='md:block hidden'
-            >
+            <Tabs value={dashboardMode} onValueChange={(v) => setDashboardMode(v as DashboardMode)} className='block'>
                 <TabsList>
-                    <TabsTrigger aria-label='View servers in a list layout.' value='list'>
+                    <TabsTrigger aria-label={t('dashboard.view.list_aria')} value='list'>
                         <svg
                             width='13'
                             height='14'
@@ -151,16 +214,16 @@ const DashboardContainer = () => {
                             fill='none'
                             xmlns='http://www.w3.org/2000/svg'
                             role='img'
-                            aria-label='List view'
+                            aria-label={t('dashboard.view.list')}
                         >
-                            <title>List view</title>
+                            <title>{t('dashboard.view.list')}</title>
                             <path
                                 d='M1 2.3C1 2.02 1 1.88 1.054 1.773C1.10215 1.67903 1.17881 1.60272 1.273 1.555C1.38 1.5 1.52 1.5 1.8 1.5H14.2C14.48 1.5 14.62 1.5 14.727 1.554C14.821 1.60215 14.8973 1.67881 14.945 1.773C15 1.88 15 2.02 15 2.3V2.7C15 2.98 15 3.12 14.945 3.227C14.8973 3.32119 14.821 3.39785 14.727 3.446C14.62 3.5 14.48 3.5 14.2 3.5H1.8C1.52 3.5 1.38 3.5 1.273 3.446C1.17903 3.39785 1.10272 3.32119 1.055 3.227C1 3.12 1 2.98 1 2.7V2.3ZM1 14.3C1 14.02 1 13.88 1.054 13.773C1.10215 13.679 1.17881 13.6027 1.273 13.555C1.38 13.5 1.52 13.5 1.8 13.5H14.2C14.48 13.5 14.62 13.5 14.727 13.555C14.8208 13.6029 14.8971 13.6792 14.945 13.773C15 13.88 15 14.02 15 14.3V14.7C15 14.98 15 15.12 14.945 15.227C14.8971 15.3208 14.8208 15.3971 14.727 15.445C14.62 15.5 14.48 15.5 14.2 15.5H1.8C1.52 15.5 1.38 15.5 1.273 15.445C1.17919 15.3971 1.10289 15.3208 1.055 15.227C1 15.12 1 14.98 1 14.7V14.3ZM1 10.3C1 10.02 1 9.88 1.054 9.773C1.10215 9.67903 1.17881 9.60272 1.273 9.555C1.38 9.5 1.52 9.5 1.8 9.5H14.2C14.48 9.5 14.62 9.5 14.727 9.555C14.8208 9.60289 14.8971 9.67918 14.945 9.773C15 9.88 15 10.02 15 10.3V10.7C15 10.98 15 11.12 14.945 11.227C14.8971 11.3208 14.8208 11.3971 14.727 11.445C14.62 11.5 14.48 11.5 14.2 11.5H1.8C1.52 11.5 1.38 11.5 1.273 11.445C1.17919 11.3971 1.10289 11.3208 1.055 11.227C1 11.12 1 10.98 1 10.7V10.3ZM1 6.3C1 6.02 1 5.88 1.054 5.773C1.10215 5.67903 1.17881 5.60272 1.273 5.555C1.38 5.5 1.52 5.5 1.8 5.5H14.2C14.48 5.5 14.62 5.5 14.727 5.554C14.821 5.60215 14.8973 5.67881 14.945 5.773C15 5.88 15 6.02 15 6.3V6.7C15 6.98 15 7.12 14.945 7.227C14.8971 7.32082 14.8208 7.39711 14.727 7.445C14.62 7.5 14.48 7.5 14.2 7.5H1.8C1.52 7.5 1.38 7.5 1.273 7.446C1.17903 7.39785 1.10272 7.32119 1.055 7.227C1 7.12 1 6.98 1 6.7V6.3Z'
                                 fill='currentColor'
                             />
                         </svg>
                     </TabsTrigger>
-                    <TabsTrigger aria-label='View servers in a grid layout.' value='grid'>
+                    <TabsTrigger aria-label={t('dashboard.view.grid_aria')} value='grid' className='max-md:hidden'>
                         <svg
                             width='13'
                             height='14'
@@ -168,9 +231,9 @@ const DashboardContainer = () => {
                             fill='none'
                             xmlns='http://www.w3.org/2000/svg'
                             role='img'
-                            aria-label='Grid view'
+                            aria-label={t('dashboard.view.grid')}
                         >
-                            <title>Grid view</title>
+                            <title>{t('dashboard.view.grid')}</title>
                             <path
                                 d='M1 3.1C1 2.54 1 2.26 1.109 2.046C1.20487 1.85785 1.35785 1.70487 1.546 1.609C1.76 1.5 2.04 1.5 2.6 1.5H5.4C5.96 1.5 6.24 1.5 6.454 1.609C6.64215 1.70487 6.79513 1.85785 6.891 2.046C7 2.26 7 2.54 7 3.1V3.9C7 4.46 7 4.74 6.891 4.954C6.79513 5.14215 6.64215 5.29513 6.454 5.391C6.24 5.5 5.96 5.5 5.4 5.5H2.6C2.04 5.5 1.76 5.5 1.546 5.391C1.35785 5.29513 1.20487 5.14215 1.109 4.954C1 4.74 1 4.46 1 3.9V3.1ZM9 3.1C9 2.54 9 2.26 9.109 2.046C9.20487 1.85785 9.35785 1.70487 9.546 1.609C9.76 1.5 10.04 1.5 10.6 1.5H13.4C13.96 1.5 14.24 1.5 14.454 1.609C14.6422 1.70487 14.7951 1.85785 14.891 2.046C15 2.26 15 2.54 15 3.1V3.9C15 4.46 15 4.74 14.891 4.954C14.7951 5.14215 14.6422 5.29513 14.454 5.391C14.24 5.5 13.96 5.5 13.4 5.5H10.6C10.04 5.5 9.76 5.5 9.546 5.391C9.35785 5.29513 9.20487 5.14215 9.109 4.954C9 4.74 9 4.46 9 3.9V3.1ZM1 8.1C1 7.54 1 7.26 1.109 7.046C1.20487 6.85785 1.35785 6.70487 1.546 6.609C1.76 6.5 2.04 6.5 2.6 6.5H5.4C5.96 6.5 6.24 6.5 6.454 6.609C6.64215 6.70487 6.79513 6.85785 6.891 7.046C7 7.26 7 7.54 7 8.1V8.9C7 9.46 7 9.74 6.891 9.954C6.79513 10.1422 6.64215 10.2951 6.454 10.391C6.24 10.5 5.96 10.5 5.4 10.5H2.6C2.04 10.5 1.76 10.5 1.546 10.391C1.35785 10.2951 1.20487 10.1422 1.109 9.954C1 9.74 1 9.46 1 8.9V8.1ZM9 8.1C9 7.54 9 7.26 9.109 7.046C9.20487 6.85785 9.35785 6.70487 9.546 6.609C9.76 6.5 10.04 6.5 10.6 6.5H13.4C13.96 6.5 14.24 6.5 14.454 6.609C14.6422 6.70487 14.7951 6.85785 14.891 7.046C15 7.26 15 7.54 15 8.1V8.9C15 9.46 15 9.74 14.891 9.954C14.7951 10.1422 14.6422 10.2951 14.454 10.391C14.24 10.5 13.96 10.5 13.4 10.5H10.6C10.04 10.5 9.76 10.5 9.546 10.391C9.35785 10.2951 9.20487 10.1422 9.109 9.954C9 9.74 9 9.46 9 8.9V8.1ZM1 13.1C1 12.54 1 12.26 1.109 12.046C1.20487 11.8578 1.35785 11.7049 1.546 11.609C1.76 11.5 2.04 11.5 2.6 11.5H5.4C5.96 11.5 6.24 11.5 6.454 11.609C6.64215 11.7049 6.79513 11.8578 6.891 12.046C7 12.26 7 12.54 7 13.1V13.9C7 14.46 7 14.74 6.891 14.954C6.79513 15.1422 6.64215 15.2951 6.454 15.391C6.24 15.5 5.96 15.5 5.4 15.5H2.6C2.04 15.5 1.76 15.5 1.546 15.391C1.35785 15.2951 1.20487 15.1422 1.109 14.954C1 14.74 1 14.46 1 13.9V13.1ZM9 13.1C9 12.54 9 12.26 9.109 12.046C9.20487 11.8578 9.35785 11.7049 9.546 11.609C9.76 11.5 10.04 11.5 10.6 11.5H13.4C13.96 11.5 14.24 11.5 14.454 11.609C14.6422 11.7049 14.7951 11.8578 14.891 12.046C15 12.26 15 12.54 15 13.1V13.9C15 14.46 15 14.74 14.891 14.954C14.7951 15.1422 14.6422 15.2951 14.454 15.391C14.24 15.5 13.96 15.5 13.4 15.5H10.6C10.04 15.5 9.76 15.5 9.546 15.391C9.35785 15.2951 9.20487 15.1422 9.109 14.954C9 14.74 9 14.46 9 13.9V13.1Z'
                                 fill='currentColor'
@@ -178,7 +241,7 @@ const DashboardContainer = () => {
                         </svg>
                     </TabsTrigger>
                     {groupsEnabled && (
-                        <TabsTrigger aria-label='View servers grouped.' value='groups'>
+                        <TabsTrigger aria-label={t('dashboard.view.groups_aria')} value='groups'>
                             <svg
                                 width='13'
                                 height='14'
@@ -186,9 +249,9 @@ const DashboardContainer = () => {
                                 fill='none'
                                 xmlns='http://www.w3.org/2000/svg'
                                 role='img'
-                                aria-label='Group view'
+                                aria-label={t('dashboard.view.groups')}
                             >
-                                <title>Group view</title>
+                                <title>{t('dashboard.view.groups')}</title>
                                 <path
                                     d='M1.5 2.5C1.5 2.086 1.5 1.879 1.581 1.715C1.652 1.57 1.77 1.452 1.915 1.381C2.079 1.3 2.286 1.3 2.7 1.3H6.3C6.714 1.3 6.921 1.3 7.085 1.381C7.23 1.452 7.348 1.57 7.419 1.715C7.5 1.879 7.5 2.086 7.5 2.5V3.1C7.5 3.514 7.5 3.721 7.419 3.885C7.348 4.03 7.23 4.148 7.085 4.219C6.921 4.3 6.714 4.3 6.3 4.3H2.7C2.286 4.3 2.079 4.3 1.915 4.219C1.77 4.148 1.652 4.03 1.581 3.885C1.5 3.721 1.5 3.514 1.5 3.1V2.5Z'
                                     fill='currentColor'
@@ -219,7 +282,7 @@ const DashboardContainer = () => {
                 </TabsList>
             </Tabs>
         ),
-        [dashboardMode, setDashboardMode, groupsEnabled],
+        [dashboardMode, setDashboardMode, groupsEnabled, t],
     );
 
     const ownerFilterDropdown = useMemo(
@@ -236,7 +299,7 @@ const DashboardContainer = () => {
     const entityFilterDropdown = useMemo(
         () => (
             <FilterDropdown
-                filterOptions={filterOptions || { owners: [], nests: [], eggs: [], nodes: [], groups: [] }}
+                filterOptions={filterOptions || EMPTY_FILTER_OPTIONS}
                 activeField={filterField}
                 activeValue={filterValue}
                 onFilterChange={handleFilterChange}
@@ -257,13 +320,13 @@ const DashboardContainer = () => {
     );
 
     const sortDropdown = useMemo(
-        () => <SortDropdown presets={SORT_PRESETS} value={sortValue} onSortChange={handleSortChange} />,
-        [sortValue, handleSortChange],
+        () => <SortDropdown presets={sortPresets} value={sortValue} onSortChange={handleSortChange} />,
+        [sortPresets, sortValue, handleSortChange],
     );
 
     const filterControlsDesktop = useMemo(
         () => (
-            <div className='hidden lg:flex items-center gap-1.5 sm:gap-2'>
+            <div className='hidden 2xl:flex items-center gap-1.5 sm:gap-2'>
                 {groupsEnabled
                     ? [entityFilterDropdown, groupDropdown, sortDropdown]
                     : [entityFilterDropdown, sortDropdown]}
@@ -274,7 +337,7 @@ const DashboardContainer = () => {
 
     const filterControlsMobile = useMemo(
         () => (
-            <div className='lg:hidden'>
+            <div className='2xl:hidden'>
                 <FiltersMenu
                     filterOptions={filterOptions || EMPTY_FILTER_OPTIONS}
                     groups={filterOptions?.groups || []}
@@ -282,7 +345,7 @@ const DashboardContainer = () => {
                     activeValue={filterValue}
                     activeGroupId={groupFilterId}
                     sortValue={sortValue}
-                    sortPresets={SORT_PRESETS}
+                    sortPresets={sortPresets}
                     showGroups={groupsEnabled}
                     onFilterChange={handleFilterChange}
                     onGroupChange={handleGroupChange}
@@ -296,6 +359,7 @@ const DashboardContainer = () => {
             filterValue,
             groupFilterId,
             sortValue,
+            sortPresets,
             groupsEnabled,
             handleFilterChange,
             handleGroupChange,
@@ -329,6 +393,7 @@ const DashboardContainer = () => {
 
     useEffect(() => {
         window.history.replaceState(null, document.title, `/${page <= 1 ? '' : `?page=${page}`}`);
+        pageScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     }, [page]);
 
     useEffect(() => {
@@ -337,33 +402,56 @@ const DashboardContainer = () => {
     }, [error, clearAndAddHttpError, clearFlashes]);
 
     return (
-        <PageContentBlock title={'Dashboard'} showFlashKey={'dashboard'}>
+        <PageContentBlock ref={pageScrollRef} title={t('dashboard.title')} showFlashKey={'dashboard'}>
             {!servers ? null : (
                 <Pagination data={servers} onPageSelect={setPage}>
-                    {({ items }) =>
-                        dashboardMode === 'groups' ? (
+                    {({ items }) => {
+                        const sortedItems =
+                            !customOrder || customOrder.length === 0 || sortValue
+                                ? items
+                                : [...items].sort((a, b) => {
+                                      const aIdx = customOrder.indexOf(a.id);
+                                      const bIdx = customOrder.indexOf(b.id);
+                                      if (aIdx === -1 && bIdx === -1) return 0;
+                                      if (aIdx === -1) return 1;
+                                      if (bIdx === -1) return -1;
+                                      return aIdx - bIdx;
+                                  });
+
+                        return dashboardMode === 'groups' ? (
                             <GroupSection
-                                servers={items}
+                                servers={sortedItems}
                                 displayOption={dashboardMode === 'grid' ? 'grid' : 'list'}
                                 groupFilterId={groupFilterId}
                                 filterActive={filterActive}
+                                currentPage={servers.pagination.currentPage}
                             />
-                        ) : items.length > 0 ? (
+                        ) : sortedItems.length > 0 ? (
                             <div
                                 className={
                                     dashboardMode === 'grid' ? 'flex flex-wrap gap-4 max-lg:flex-col max-lg:gap-0' : ''
                                 }
                             >
-                                {items.map((server, index) => (
+                                {sortedItems.map((server, index) => (
+                                    // biome-ignore lint/a11y/noStaticElementInteractions: HTML5 drag-and-drop container
                                     <div
                                         key={`${server.uuid}-${dashboardMode}`}
-                                        className={`transform-gpu skeleton-anim-2 ${
-                                            dashboardMode === 'grid'
-                                                ? items.length === 1
-                                                    ? 'w-[calc(50%-0.5rem)] max-lg:w-full'
-                                                    : 'w-[calc(50%-0.5rem)] max-lg:w-full'
-                                                : 'mb-4'
-                                        } max-lg:mb-4`}
+                                        role='presentation'
+                                        draggable
+                                        onDragStart={(e) => handleDragStart(e, server)}
+                                        onDragEnd={handleDragEnd}
+                                        onDragOver={(e) => handleDragOver(e, server.id)}
+                                        onDragLeave={() => handleDragLeave(server.id)}
+                                        onDrop={(e) => handleDrop(e, server, sortedItems)}
+                                        className={`transform-gpu skeleton-anim-2 transition-all duration-200 cursor-default ${
+                                            dashboardMode === 'grid' ? 'w-[calc(50%-0.5rem)] max-lg:w-full' : 'mb-4'
+                                        } max-lg:mb-4 ${
+                                            draggingServerId === server.id ? 'opacity-40 scale-[0.98]' : ''
+                                        } ${
+                                            dragOverServerId === server.id
+                                                ? 'ring-2 ring-cream-400 rounded-xl bg-mocha-400/40 shadow-lg shadow-cream-500/10'
+                                                : ''
+                                        }`}
                                         style={{
                                             animationDelay: `${index * 50 + 50}ms`,
                                             animationTimingFunction:
@@ -384,22 +472,45 @@ const DashboardContainer = () => {
                                 ))}
                             </div>
                         ) : (
-                            <div className='text-center text-sm text-zinc-400 absolute w-full left-1/2 -translate-x-1/2'>
-                                <p className='max-w-sm mx-auto mb-5'>
+                            <div className='flex flex-col items-center justify-center py-16 text-center'>
+                                <div className='size-16 rounded-2xl bg-mocha-500/50 flex items-center justify-center mb-4'>
+                                    <ServerIcon className='size-8 text-cream-200/60' />
+                                </div>
+                                <p className='text-sm font-medium text-cream-200 mb-1'>
                                     {ownerFilter === 'admin-all'
-                                        ? 'There are no other servers to display.'
-                                        : ownerFilter === 'all'
-                                          ? 'No Server Shared With your Account'
-                                          : 'There are no servers associated with your account.'}
+                                        ? t('dashboard.empty.admin_all_title')
+                                        : t('dashboard.empty.title')}
                                 </p>
-                                <h3 className='text-lg font-medium text-zinc-200 mb-2'>
-                                    {ownerFilter === 'admin-all' ? 'No other servers found' : 'No servers found'}
-                                </h3>
+                                <p className='text-xs text-cream-200/40 mb-5 max-w-xs'>
+                                    {ownerFilter === 'admin-all'
+                                        ? t('dashboard.empty.admin_all_description')
+                                        : ownerFilter === 'all'
+                                          ? t('dashboard.empty.shared_description')
+                                          : t('dashboard.empty.description')}
+                                </p>
+                                {filterActive && (
+                                    <button
+                                        type='button'
+                                        onClick={clearFilters}
+                                        className='flex items-center gap-2 px-4 py-2 bg-cream-400 text-mocha-500 hover:bg-cream-500/80 rounded-lg text-sm font-medium transition-colors'
+                                    >
+                                        <Xmark className='size-4' />
+                                        {t('dashboard.clear_filters')}
+                                    </button>
+                                )}
                             </div>
-                        )
-                    }
+                        );
+                    }}
                 </Pagination>
             )}
+            <div
+                ref={previewRef}
+                aria-hidden
+                className='pointer-events-none fixed -left-[9999px] top-0 z-50 flex w-72 items-center gap-3 rounded-xl border border-cream-500/30 bg-mocha-500 px-4 py-3 shadow-lg shadow-black/50'
+            >
+                <Grip className='w-4 h-4 text-cream-400 shrink-0' />
+                <span ref={previewNameRef} className='truncate text-sm font-semibold text-cream-200' />
+            </div>
         </PageContentBlock>
     );
 };

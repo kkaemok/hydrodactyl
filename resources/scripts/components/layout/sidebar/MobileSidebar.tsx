@@ -5,6 +5,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 
 import Logo from '@/components/elements/HydroLogo';
 import { useSidebar } from '@/contexts/SidebarContext';
+import { useTranslation } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 
 import NavItem from './NavItem';
@@ -20,17 +21,20 @@ interface NavItemData {
     ref: RefObject<HTMLAnchorElement | null>;
     end: boolean;
     permission?: string | string[];
+    hardNav?: boolean;
 }
 
 interface MobileSidebarProps {
     navItems: NavItemData[];
     bottomNavItems?: NavItemData[];
+    admin?: boolean;
 }
 
-const MobileSidebarPanel = memo<{ navItems: NavItemData[]; bottomNavItems: NavItemData[] }>(
-    ({ navItems, bottomNavItems }) => {
+const MobileSidebarPanel = memo<{ navItems: NavItemData[]; bottomNavItems: NavItemData[]; admin?: boolean }>(
+    ({ navItems, bottomNavItems, admin }) => {
         const { setMobileOpen, isMobileOpen } = useSidebar();
         const location = useLocation();
+        const { t } = useTranslation();
 
         // biome-ignore lint/correctness/useExhaustiveDependencies: close menu on route change; setMobileOpen is stable
         useEffect(() => {
@@ -59,7 +63,7 @@ const MobileSidebarPanel = memo<{ navItems: NavItemData[]; bottomNavItems: NavIt
                     type='button'
                     className='absolute inset-0 bg-black/60 backdrop-blur-sm cursor-default transition-opacity duration-300'
                     onClick={() => setMobileOpen(false)}
-                    aria-label='Close menu'
+                    aria-label={t('panel.close_menu')}
                     aria-hidden='true'
                     tabIndex={-1}
                 />
@@ -75,13 +79,23 @@ const MobileSidebarPanel = memo<{ navItems: NavItemData[]; bottomNavItems: NavIt
                     data-sidebar-minimized='false'
                 >
                     <div className='mobile-sidebar-logo h-16 flex items-center flex-none'>
-                        <NavLink
-                            to='/'
-                            className='flex h-8 w-fit shrink-0 items-center hydrodactyl-logo'
-                            aria-label='Hydrodactyl home page'
-                        >
-                            <Logo className='h-8 w-8 shrink-0 object-contain' />
-                        </NavLink>
+                        {admin ? (
+                            <a
+                                href='/'
+                                className='flex h-8 w-fit shrink-0 items-center hydrodactyl-logo'
+                                aria-label={t('panel.home_page', { name: 'Hydrodactyl' })}
+                            >
+                                <Logo className='h-8 w-8 shrink-0 object-contain' />
+                            </a>
+                        ) : (
+                            <NavLink
+                                to='/'
+                                className='flex h-8 w-fit shrink-0 items-center hydrodactyl-logo'
+                                aria-label={t('panel.home_page', { name: 'Hydrodactyl' })}
+                            >
+                                <Logo className='h-8 w-8 shrink-0 object-contain' />
+                            </NavLink>
+                        )}
                     </div>
 
                     <ul className='flex flex-col text-sm'>
@@ -96,6 +110,7 @@ const MobileSidebarPanel = memo<{ navItems: NavItemData[]; bottomNavItems: NavIt
                                     lastItem={index === navItems.length - 1}
                                     permission={item.permission}
                                     onNavClick={() => setMobileOpen(false)}
+                                    hardNav={item.hardNav}
                                 />
                             </li>
                         ))}
@@ -113,6 +128,7 @@ const MobileSidebarPanel = memo<{ navItems: NavItemData[]; bottomNavItems: NavIt
                                         lastItem={index === bottomNavItems.length - 1}
                                         permission={item.permission}
                                         onNavClick={() => setMobileOpen(false)}
+                                        hardNav={item.hardNav}
                                     />
                                 </li>
                             ))}
@@ -128,13 +144,14 @@ MobileSidebarPanel.displayName = 'MobileSidebarPanel';
 
 const MobileSidebarToggle = memo(() => {
     const { toggleMobile } = useSidebar();
+    const { t } = useTranslation();
 
     return (
         <button
             type='button'
             onClick={toggleMobile}
             className='lg:hidden p-1 rounded-full hover:bg-mocha-400 transition shrink-0'
-            aria-label='Open menu'
+            aria-label={t('panel.open_menu')}
         >
             <HugeiconsIcon size={20} strokeWidth={2} icon={Menu02Icon} />
         </button>
@@ -143,8 +160,8 @@ const MobileSidebarToggle = memo(() => {
 
 MobileSidebarToggle.displayName = 'MobileSidebarToggle';
 
-export default function MobileSidebar({ navItems, bottomNavItems = [] }: MobileSidebarProps) {
-    return <MobileSidebarPanel navItems={navItems} bottomNavItems={bottomNavItems} />;
+export default function MobileSidebar({ navItems, bottomNavItems = [], admin }: MobileSidebarProps) {
+    return <MobileSidebarPanel navItems={navItems} bottomNavItems={bottomNavItems} admin={admin} />;
 }
 
 export { MobileSidebarToggle };

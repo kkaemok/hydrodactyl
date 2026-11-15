@@ -80,7 +80,7 @@ class InitiateBackupService
         if ($period > 0) {
             $previous = $this->repository->getBackupsGeneratedDuringTimespan($server->id, $period);
             if ($previous->count() >= $limit) {
-                $message = sprintf('Only %d backups may be generated within a %d second span of time.', $limit, $period);
+                $message = __('exceptions.backups.rate_limited', ['limit' => $limit, 'period' => $period]);
 
                 throw new TooManyRequestsHttpException((int) CarbonImmutable::now()->diffInSeconds($previous->last()->created_at->addSeconds($period)), $message);
             }
@@ -89,10 +89,11 @@ class InitiateBackupService
         // Check if the server has reached or exceeded its backup limit.
         // completed_at == null will cover any ongoing backups, while is_successful == true will cover any completed backups.
         $successful = $this->repository->getNonFailedBackups($server);
+        $successfulCount = $successful->count();
         if ($server->backup_limit == null) {
-            $server->backup_limit = $successful->count() + 1;
+            $server->backup_limit = $successfulCount + 1;
         };
-        if (!$server->backup_limit || $successful->count() >= $server->backup_limit) {
+        if (!$server->backup_limit || $successfulCount >= $server->backup_limit) {
             // Do not allow the user to continue if this server is already at its limit and can't override.
             if ($server->backup_limit == null) {
                 $server->backup_limit = 12;
@@ -124,7 +125,7 @@ class InitiateBackupService
             $backup = $this->repository->create([
                 'server_id' => $server->id,
                 'uuid' => Uuid::uuid4()->toString(),
-                'name' => trim($name) ?: sprintf('Backup at %s', CarbonImmutable::now()->toDateTimeString()),
+                'name' => trim($name) ?: __('exceptions.backups.name', ['date' => CarbonImmutable::now()->toDateTimeString()]),
                 'ignored_files' => array_values($this->ignoredFiles ?? []),
                 'disk' => $adapter->value,
                 'is_locked' => $this->isLocked,

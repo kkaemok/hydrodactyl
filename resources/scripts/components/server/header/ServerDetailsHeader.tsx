@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 
 import { SocketEvent, SocketRequest } from '@/components/server/events';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useTranslation } from '@/i18n/I18nProvider';
 
-import { bytesToString } from '@/lib/formatters';
+import { bytesToString, formatNumber } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import useWebsocketEvent from '@/plugins/useWebsocketEvent';
 import { ServerContext } from '@/state/server';
@@ -13,7 +14,24 @@ type Stats = Record<'memory' | 'cpu' | 'disk' | 'uptime' | 'rx' | 'tx', number>;
 // @ts-expect-error - Unused parameter in component definition
 const _Limit = ({ children }: { limit: string | null; children: React.ReactNode }) => <>{children}</>;
 
+interface DetailProps {
+    label: string;
+    loading?: boolean;
+    children?: React.ReactNode;
+    className?: string;
+}
+
+const Detail = ({ label, loading, children, className }: DetailProps) => {
+    return (
+        <div className={cn('flex flex-col', className)}>
+            <span className='font-bold uppercase text-cream-400/50 text-xs'>{label}</span>
+            <span className={`text-sm`}>{loading ? <Skeleton className='w-full h-[1lh]' /> : children}</span>
+        </div>
+    );
+};
+
 const ServerDetailsHeader = ({ className }: { className?: string }) => {
+    const { t, locale } = useTranslation();
     const [stats, setStats] = useState<Stats>({
         memory: 0,
         cpu: 0,
@@ -71,32 +89,16 @@ const ServerDetailsHeader = ({ className }: { className?: string }) => {
         setLoading(false);
     });
 
-    interface DetailProps {
-        label: string;
-        loading?: boolean;
-        children?: React.ReactNode;
-        className?: string;
-    }
-
-    const Detail = ({ label, loading, children, className }: DetailProps) => {
-        return (
-            <div className={cn('flex flex-col', className)}>
-                <span className='font-bold uppercase text-cream-400/50 text-xs'>{label}</span>
-                <span className={`text-sm`}>{loading ? <Skeleton className='w-full h-[1lh]' /> : children}</span>
-            </div>
-        );
-    };
-
     return (
         <div className={cn('flex md:flex-row gap-4 flex-col text-nowrap', className)}>
-            <Detail label={'CPU'} className='w-14' loading={loading}>
-                {`${stats.cpu.toFixed(2)}%`}
+            <Detail label={t('server.header.cpu')} className='w-14' loading={loading}>
+                {`${formatNumber(stats.cpu, locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}
             </Detail>
-            <Detail label={'RAM'} className='w-14' loading={loading}>
-                {bytesToString(stats.memory, 0)}
+            <Detail label={t('server.header.ram')} className='w-14' loading={loading}>
+                {bytesToString(stats.memory, 0, locale)}
             </Detail>
-            <Detail label={'Disk'} className='w-20' loading={loading}>
-                {bytesToString(stats.disk)}
+            <Detail label={t('server.header.disk')} className='w-20' loading={loading}>
+                {bytesToString(stats.disk, 2, locale)}
             </Detail>
         </div>
     );

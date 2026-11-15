@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import Can from '@/components/elements/Can';
 import RemoveSubuserButton from '@/components/server/users/RemoveSubuserButton';
 import { Button } from '@/components/ui/button';
+import { useTranslation } from '@/i18n/I18nProvider';
 
 import { ServerContext } from '@/state/server';
 import type { Subuser } from '@/state/server/subusers';
@@ -14,6 +15,7 @@ interface Props {
 }
 
 const UserRow = ({ subuser }: Props) => {
+    const { t } = useTranslation();
     const uuid = useStoreState((state) => state.user?.data?.uuid);
     const navigate = useNavigate();
     const serverId = ServerContext.useStoreState((state) => state.server.data?.id);
@@ -34,7 +36,7 @@ const UserRow = ({ subuser }: Props) => {
 
             <div className='flex-1 min-w-0'>
                 <div className='flex items-center gap-2 mb-1.5'>
-                    <h3 className='text-sm font-medium text-zinc-100 truncate'>{subuser.email}</h3>
+                    <h3 className='text-sm font-medium text-zinc-100 truncate'>{subuser.username}</h3>
                     <span
                         className={`text-xs font-medium px-2 py-0.5 rounded ${
                             subuser.twoFactorEnabled
@@ -42,12 +44,13 @@ const UserRow = ({ subuser }: Props) => {
                                 : 'text-zinc-400 bg-zinc-500/20 border border-zinc-500/30'
                         }`}
                     >
-                        {subuser.twoFactorEnabled ? 'MFA Enabled' : 'MFA Disabled'}
+                        {subuser.twoFactorEnabled ? t('server.users.mfa_enabled') : t('server.users.mfa_disabled')}
                     </span>
                 </div>
                 <p className='text-xs text-zinc-400'>
-                    {subuser.permissions.filter((permission) => permission !== 'websocket.connect').length} permissions
-                    assigned
+                    {t('server.users.permissions_assigned', {
+                        count: subuser.permissions.filter((permission) => permission !== 'websocket.connect').length,
+                    })}
                 </p>
             </div>
 
@@ -60,7 +63,7 @@ const UserRow = ({ subuser }: Props) => {
                                 size='sm'
                                 className='p-2'
                                 onClick={handleEditClick}
-                                title='Edit subuser'
+                                title={t('server.users.edit_subuser')}
                             >
                                 <Pencil width={22} height={22} fill='currentColor' />
                             </Button>

@@ -40,13 +40,13 @@ type BackupResponse = PaginatedResult<ServerBackup> & {
     };
 };
 
-export default () => {
+export default (enabled = true) => {
     const { page } = useContext(Context);
     const uuid = ServerContext.useStoreState((state) => state.server.data?.uuid);
     const daemonType = getGlobalDaemonType();
 
     return useSWR<BackupResponse>(
-        ['server:backups', uuid, page],
+        enabled ? ['server:backups', uuid, page] : null,
         async () => {
             const { data } = await http.get(`/api/client/servers/${daemonType}/${uuid}/backups`, { params: { page } });
 
@@ -61,6 +61,11 @@ export default () => {
         {
             revalidateOnFocus: false,
             revalidateOnReconnect: true,
+            // Wings/Calagopus do not emit live backup progress events, so poll
+            // while a backup is running to pick up its completion (or failure)
+            // without needing a page reload. Polling stops once nothing is pending.
+            refreshInterval: (data) =>
+                data?.items?.some((backup) => !backup.isSuccessful && backup.completedAt === null) ? 3000 : 0,
         },
     );
 };

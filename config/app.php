@@ -28,6 +28,14 @@ return [
 
   'custom_nav_items' => '[]',
 
+  // Brand accent color — overridden by settings::app:brand_color when set.
+  // Rendered from config so markup never hardcodes the hex.
+  'brand_color' => env('APP_BRAND_COLOR', '#52A9FF'),
+
+  // The stock brand color — never overridden by settings so it can serve as
+  // the reference for "reset to default" and be exposed by the branding API.
+  'brand_color_default' => env('APP_BRAND_COLOR', '#52A9FF'),
+
   /*
   |--------------------------------------------------------------------------
   | Application Environment
@@ -91,9 +99,9 @@ return [
   |
   */
 
-  'locale' => env('APP_LOCALE', 'en'),
+    'locale' => env('APP_LOCALE', 'en-US'),
 
-  'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en'),
+    'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en-US'),
 
   'faker_locale' => env('APP_FAKER_LOCALE', 'en_US'),
 
@@ -228,7 +236,6 @@ return [
   'aliases' => Facade::defaultAliases()->merge([
     'Alert' => Prologue\Alerts\Facades\Alert::class,
     'Carbon' => Carbon\Carbon::class,
-    'JavaScript' => Laracasts\Utilities\JavaScript\JavaScriptFacade::class,
     'Theme' => Pterodactyl\Extensions\Facades\Theme::class,
 
     // Custom Facades

@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!-- Copyright (c) 2025-Present BlueprintFramework, parent collaborators, and contributors -->
-<html data-hydrodactyl-html lang="en" style="background-color: #11100E; height: 100%; width: 100%; margin: 0; padding: 0;">
+<html data-hydrodactyl-html lang="{{ str_replace('_', '-', app()->getLocale()) }}" style="background-color: var(--color-bg, #11100E); height: 100%; width: 100%; margin: 0; padding: 0;">
     <head>
+        @include('templates.appearance')
         <title>{{ config('app.name', 'Panel') }}</title>
 
         @section('meta')
@@ -16,6 +17,10 @@
                 $_favVal = config('app.logo.value');
                 if ($_favType === 'upload' && $_favVal && Storage::disk('public')->exists($_favVal)) {
                     $_favUrl = url('storage/' . $_favVal);
+                    $_favPath = Storage::disk('public')->path($_favVal);
+                    if (file_exists($_favPath)) {
+                        $_favUrl .= '?v=' . filemtime($_favPath);
+                    }
                 } elseif ($_favType === 'link' && $_favVal) {
                     $_favUrl = $_favVal;
                 } else {
@@ -25,11 +30,12 @@
             @if($_favUrl)
             <link rel="icon" href="{{ $_favUrl }}" />
             <link rel="apple-touch-icon" href="{{ $_favUrl }}" />
-            @endif
+            @else
             <link rel="icon" type="image/png" href="/favicons/favicon-96x96.png" sizes="96x96" />
             <link rel="icon" type="image/svg+xml" href="/favicons/favicon.svg" />
             <link rel="shortcut icon" href="/favicons/favicon.ico" />
             <link rel="apple-touch-icon" sizes="180x180" href="/favicons/apple-touch-icon.png" />
+            @endif
             <meta name="apple-mobile-web-app-title" content="Hydrodactyl" />
             <link rel="manifest" href="/favicons/site.webmanifest" />
 
@@ -48,7 +54,7 @@
                     window.SiteConfiguration = {!! json_encode($siteConfiguration) !!};
                 </script>
             @endif
-            @if(Auth::guest() && !\Pterodactyl\Models\User::query()->exists())
+            @if(Auth::guest() && !Cache::get('pterodactyl.setup_complete', false) && !\Pterodactyl\Models\User::query()->exists())
                 <script>window.SetupRequired = true;</script>
             @endif
         @show
@@ -61,9 +67,15 @@
         @include('layouts.scripts')
 
         @viteReactRefresh
-        @vite('resources/scripts/index.tsx')
+        @vite($viteEntry ?? 'resources/scripts/index.tsx')
+
+        <style>
+            :root {
+                --brand-color: {{ config('app.brand_color', '#52A9FF') }};
+            }
+        </style>
     </head>
-    <body data-hydrodactyl-body class="{{ $css['body'] }}" style="background-color: #11100E; height: 100%; width: 100%; margin: 0; padding: 0;">
+    <body data-hydrodactyl-body class="{{ $css['body'] }}" style="background-color: var(--color-bg, #11100E); height: 100%; width: 100%; margin: 0; padding: 0;">
         @section('content')
             @yield('above-container')
             @yield('container')

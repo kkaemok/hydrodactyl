@@ -9,6 +9,9 @@ use Pterodactyl\Models\Server;
 use Illuminate\Http\JsonResponse;
 use Pterodactyl\Facades\Activity;
 use Pterodactyl\Models\Permission;
+use Illuminate\Support\Facades\Crypt;
+use PragmaRX\Google2FA\Google2FA;
+use Laravel\Sanctum\TransientToken;
 use Illuminate\Auth\Access\AuthorizationException;
 use Pterodactyl\Services\Backups\Wings\DeleteBackupService;
 use Pterodactyl\Services\Backups\Wings\DownloadLinkService;
@@ -32,6 +35,7 @@ class BackupController extends ClientApiController
         private InitiateBackupService $initiateBackupService,
         private DownloadLinkService $downloadLinkService,
         private BackupRepository $repository,
+        private Google2FA $google2FA,
     ) {
         parent::__construct();
     }
@@ -139,6 +143,8 @@ class BackupController extends ClientApiController
             throw new AuthorizationException();
         }
 
+        $this->confirmDestructiveAction($request);
+
         $this->deleteBackupService->handle($backup);
 
         Activity::event('server:backup.delete')
@@ -147,6 +153,80 @@ class BackupController extends ClientApiController
             ->log();
 
         return new JsonResponse([], JsonResponse::HTTP_NO_CONTENT);
+    }
+
+    /**
+     * Delete every backup that belongs to the server.
+     *
+     * @throws \Throwable
+     * @throws AuthorizationException
+     */
+    public function deleteAll(Request $request, Server $server): JsonResponse
+    {
+        if (!$request->user()->can(Permission::ACTION_BACKUP_DELETE, $server)) {
+            throw new AuthorizationException();
+        }
+
+        $this->confirmDestructiveAction($request);
+
+        $backups = $server->backups()->get();
+        if ($backups->isEmpty()) {
+            throw new BadRequestHttpException(__('exceptions.client.backups.none_to_delete'));
+        }
+
+        $deleted = 0;
+        foreach ($backups as $backup) {
+            try {
+                // "Delete All" is explicitly destructive: locked backups go too.
+                if ($backup->is_locked) {
+                    $backup->update(['is_locked' => false]);
+                }
+
+                $this->deleteBackupService->handle($backup);
+                ++$deleted;
+            } catch (\Exception $e) {
+                \Log::error("Failed to delete backup {$backup->uuid}", ['error' => $e->getMessage()]);
+            }
+        }
+
+        Activity::event('server:backup.delete_all')
+            ->subject($server)
+            ->property('count', $deleted)
+            ->log();
+
+        return new JsonResponse(['deleted' => $deleted]);
+    }
+
+    /**
+     * Require password (and TOTP when enabled) for destructive actions made
+     * through a browser session. API keys are exempt.
+     */
+    private function confirmDestructiveAction(Request $request): void
+    {
+        $token = $request->user()->currentAccessToken();
+
+        // Only requests carrying a real API key skip the confirmation; browser
+        // sessions arrive with a Sanctum transient token.
+        if ($token && !$token instanceof TransientToken) {
+            return;
+        }
+
+        $password = $request->input('password');
+        if (empty($password) || !password_verify($password, $request->user()->password)) {
+            throw new BadRequestHttpException(__('exceptions.client.backups.password_not_valid'));
+        }
+
+        if ($request->user()->use_totp) {
+            $totpCode = $request->input('totp_code');
+            if (empty($totpCode)) {
+                throw new BadRequestHttpException(__('exceptions.client.backups.two_factor_required'));
+            }
+
+            $secret = Crypt::decrypt($request->user()->totp_secret);
+            if (!$this->google2FA->verifyKey($secret, $totpCode)) {
+                throw new BadRequestHttpException(__('exceptions.client.backups.two_factor_invalid'));
+            }
+        }
     }
 
     /**
@@ -162,7 +242,7 @@ class BackupController extends ClientApiController
         }
 
         if ($backup->disk !== BackupAdapter::S3 && $backup->disk !== BackupAdapter::Wings) {
-            throw new BadRequestHttpException('The backup requested references an unknown disk driver type and cannot be downloaded.');
+            throw new BadRequestHttpException(__('exceptions.client.backups.unknown_disk'));
         }
 
         $url = $this->downloadLinkService->handle($backup, $request->user());
@@ -182,14 +262,16 @@ class BackupController extends ClientApiController
      */
     public function restore(RestoreBackupRequest $request, Server $server, Backup $backup): JsonResponse
     {
+        $this->confirmDestructiveAction($request);
+
         // Cannot restore a backup unless a server is fully installed and not currently
         // processing a different backup restoration request.
         if (!is_null($server->status)) {
-            throw new BadRequestHttpException('This server is not currently in a state that allows for a backup to be restored.');
+            throw new BadRequestHttpException(__('exceptions.client.backups.restore_state_invalid'));
         }
 
         if (!$backup->is_successful && is_null($backup->completed_at)) {
-            throw new BadRequestHttpException('This backup cannot be restored at this time: not completed or failed.');
+            throw new BadRequestHttpException(__('exceptions.client.backups.restore_failed'));
         }
 
         $log = Activity::event('server:backup.restore')

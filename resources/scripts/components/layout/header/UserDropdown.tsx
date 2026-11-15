@@ -17,6 +17,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useTranslation } from '@/i18n/I18nProvider';
 import { sha256Hash } from '@/lib/helpers';
 
 import { Button } from '../../ui/button';
@@ -33,16 +34,20 @@ export interface UserDropdownMenuItem {
         href: string;
         external?: boolean;
     };
+    active?: boolean;
+    disabled?: boolean;
 }
 
 interface UserDropdownProps {
     serverId?: string;
+    admin?: boolean;
 }
 
-export default function UserDropdown({ serverId }: UserDropdownProps) {
+export default function UserDropdown({ serverId, admin = false }: UserDropdownProps) {
     const rootAdmin = useStoreState((state) => state.user.data?.rootAdmin);
     const email = useStoreState((state) => state.user.data?.email);
     const navigate = useNavigate();
+    const { t } = useTranslation();
     const [emailHash, setEmailHash] = useState<string>('');
 
     useEffect(() => {
@@ -66,11 +71,11 @@ export default function UserDropdown({ serverId }: UserDropdownProps) {
     const defaultMenuItems: UserDropdownMenuItem[] = [
         {
             id: 'user-settings',
-            label: 'Settings',
+            label: t('navigation.settings'),
             icon: () => <HugeiconsIcon size={16} strokeWidth={2} icon={Settings02Icon} />,
             link: {
                 href: '/account',
-                external: false,
+                external: admin,
             },
             type: 'item',
         },
@@ -81,11 +86,11 @@ export default function UserDropdown({ serverId }: UserDropdownProps) {
         },
         {
             id: 'admin-panel',
-            label: 'Admin Panel',
+            label: admin ? t('panel.client_panel') : t('panel.admin_panel'),
             icon: () => <HugeiconsIcon size={16} strokeWidth={2} icon={UserShield02Icon} />,
-            badge: 'Staff',
+            badge: t('panel.staff'),
             link: {
-                href: '/admin',
+                href: admin ? '/' : '/admin',
                 external: true,
             },
             showWhen: rootAdmin,
@@ -93,7 +98,7 @@ export default function UserDropdown({ serverId }: UserDropdownProps) {
         },
         {
             id: 'logout',
-            label: 'Log Out',
+            label: t('panel.log_out'),
             icon: () => <HugeiconsIcon size={16} strokeWidth={2} icon={Logout03Icon} />,
             onSelect: onTriggerLogout,
             type: 'item',
@@ -106,13 +111,13 @@ export default function UserDropdown({ serverId }: UserDropdownProps) {
     if (serverId && rootAdmin) {
         const manageServerItem: UserDropdownMenuItem = {
             id: 'manage-server',
-            label: 'Manage Server',
+            label: t('panel.manage_server'),
             icon: () => <HugeiconsIcon size={16} strokeWidth={2} icon={ServerStack02Icon} />,
             link: {
-                href: `/admin/servers/view/${serverId}`,
+                href: `/admin/servers/${serverId}`,
                 external: true,
             },
-            badge: 'Staff',
+            badge: t('panel.staff'),
             type: 'item',
         };
 
@@ -132,19 +137,19 @@ export default function UserDropdown({ serverId }: UserDropdownProps) {
                 <Button
                     variant={'secondary'}
                     size={'sm'}
-                    aria-label='Account menu'
+                    aria-label={t('panel.account_menu')}
                     className='h-11 sm:h-8 px-2 sm:px-3 gap-1 rounded-full'
                 >
                     <div className='flex flex-row items-center gap-1.5'>
                         <div className='grid aspect-square size-5 place-content-center overflow-hidden rounded-full border border-mocha-400 bg-mocha-400'>
                             <img
                                 src={`https://www.gravatar.com/avatar/${emailHash}?d=identicon&s=32`}
-                                alt='User avatar'
+                                alt={t('panel.user_avatar')}
                                 className='w-full h-full object-cover'
                                 draggable={false}
                             />
                         </div>
-                        <span className='hidden sm:inline max-w-[140px] truncate'>{email}</span>
+                        <span className='hidden sm:inline max-w-[120px] truncate'>{email}</span>
                     </div>
                     <HugeiconsIcon size={16} strokeWidth={2} icon={ArrowDown01Icon} className='hidden sm:inline' />
                 </Button>
@@ -174,13 +179,19 @@ export default function UserDropdown({ serverId }: UserDropdownProps) {
                         return (
                             <DropdownMenuItem
                                 key={item.id}
+                                disabled={item.disabled}
+                                aria-current={item.active ? 'page' : undefined}
                                 onSelect={handleSelect}
-                                className={`flex items-center gap-2 ${item.link?.external ? 'cursor-pointer' : ''}`}
+                                className={`flex items-center gap-2 ${item.link?.external ? 'cursor-pointer' : ''} ${
+                                    item.active
+                                        ? 'bg-hydro-500/15 font-medium text-hydro-400 data-[disabled]:opacity-100!'
+                                        : ''
+                                }`}
                             >
                                 {IconComponent && <IconComponent className='size-4' />}
                                 {item.label}
                                 {item.badge && (
-                                    <span className='ml-auto z-10 rounded-full bg-brand px-2 py-1 text-xs text-white'>
+                                    <span className='ml-auto z-10 rounded-full bg-hydro-500 px-2 py-1 text-xs text-mocha-500'>
                                         {item.badge}
                                     </span>
                                 )}

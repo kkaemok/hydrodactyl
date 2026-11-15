@@ -3,6 +3,7 @@ import { Fragment, memo } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 
 import Can from '@/components/elements/Can';
+import { useTranslation } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 
 export interface BottomNavItem {
@@ -12,6 +13,7 @@ export interface BottomNavItem {
     minimizedText?: string;
     end?: boolean;
     permission?: string | string[];
+    hardNav?: boolean;
 }
 
 interface BottomNavProps {
@@ -24,6 +26,7 @@ interface BottomNavProps {
 // Hides its scrollbar for a clean native "sliding tab" feel.
 const BottomNav = memo(({ items }: BottomNavProps) => {
     const location = useLocation();
+    const { t } = useTranslation();
 
     if (items.length === 0) return null;
 
@@ -32,13 +35,14 @@ const BottomNav = memo(({ items }: BottomNavProps) => {
 
     return (
         <nav
-            aria-label='Primary navigation'
+            aria-label={t('panel.primary_navigation')}
             className='lg:hidden fixed inset-x-0 bottom-0 z-[9996] border-t border-mocha-400 bg-bg-lowered pb-[env(safe-area-inset-bottom)]'
         >
             <ul className='flex h-14 items-stretch gap-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'>
                 {items.map((item) => {
                     const external = /^https?:\/\//i.test(item.to);
-                    const active = !external && isActive(item.to, item.end);
+                    const hardNav = item.hardNav;
+                    const active = !external && !hardNav && isActive(item.to, item.end);
                     const label = item.minimizedText ?? item.text;
                     const className =
                         'group flex w-full flex-col items-center justify-center gap-1 py-2 touch-manipulation';
@@ -47,7 +51,7 @@ const BottomNav = memo(({ items }: BottomNavProps) => {
                             <HugeiconsIcon
                                 className={cn(
                                     'size-5 transition-colors',
-                                    active ? 'text-brand' : 'text-white/55 group-hover:text-white',
+                                    active ? 'text-hydro-400' : 'text-secondary group-hover:text-primary',
                                 )}
                                 strokeWidth={2}
                                 icon={item.icon}
@@ -55,7 +59,7 @@ const BottomNav = memo(({ items }: BottomNavProps) => {
                             <span
                                 className={cn(
                                     'max-w-full truncate text-[10px] leading-none transition-colors',
-                                    active ? 'font-semibold text-brand' : 'text-white/55 group-hover:text-white',
+                                    active ? 'font-semibold text-hydro-400' : 'text-secondary group-hover:text-primary',
                                 )}
                             >
                                 {label}
@@ -66,6 +70,10 @@ const BottomNav = memo(({ items }: BottomNavProps) => {
                         <li key={item.to} className='flex min-w-[72px] flex-1 items-stretch'>
                             {external ? (
                                 <a href={item.to} className={className} target='_blank' rel='noreferrer'>
+                                    {content}
+                                </a>
+                            ) : hardNav ? (
+                                <a href={item.to} className={className}>
                                     {content}
                                 </a>
                             ) : (

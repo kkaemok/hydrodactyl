@@ -2,6 +2,7 @@
 
 namespace Pterodactyl\Repositories\Eloquent;
 
+use Illuminate\Support\Facades\Cache;
 use Pterodactyl\Models\Setting;
 use Pterodactyl\Contracts\Repository\SettingsRepositoryInterface;
 
@@ -26,11 +27,15 @@ class SettingsRepository extends EloquentRepository implements SettingsRepositor
      */
     public function set(string $key, ?string $value = null)
     {
-        // Clear item from the cache.
+        // Clear item from the per-process cache.
         $this->clearCache($key);
         $this->withoutFreshModel()->updateOrCreate(['key' => $key], ['value' => $value ?? '']);
 
         self::$cache[$key] = $value;
+
+        // Invalidate the cached settings collection so SettingsServiceProvider
+        // picks up the new value on the next request.
+        Cache::forget('pterodactyl:settings:all');
     }
 
     /**
@@ -63,6 +68,10 @@ class SettingsRepository extends EloquentRepository implements SettingsRepositor
     {
         $this->clearCache($key);
         $this->deleteWhere(['key' => $key]);
+
+        // Invalidate the cached settings collection so SettingsServiceProvider
+        // picks up the change on the next request.
+        Cache::forget('pterodactyl:settings:all');
     }
 
     /**

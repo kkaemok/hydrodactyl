@@ -4,6 +4,7 @@ import { type ChangeEvent, memo, useEffect, useRef, useState } from 'react';
 
 import { Input } from '@/components/ui/input';
 import { KeyboardShortcut } from '@/components/ui/keyboard-shortcut';
+import { useTranslation } from '@/i18n/I18nProvider';
 
 const SearchIcon = memo(() => (
     <HugeiconsIcon
@@ -21,6 +22,7 @@ interface SearchSectionProps {
 }
 
 const SearchSection = memo(({ className, onSearch }: SearchSectionProps) => {
+    const { t } = useTranslation();
     const [searchValue, setSearchValue] = useState('');
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -63,16 +65,16 @@ const SearchSection = memo(({ className, onSearch }: SearchSectionProps) => {
     };
 
     return (
-        <div className={`flex items-center gap-2 h-full group ${className || ''}`}>
-            <div className='relative w-full transition-all duration-200 ease-out group mx-auto'>
+        <div className={`flex min-w-0 items-center gap-2 h-full group ${className || ''}`}>
+            <div className='relative w-full min-w-0 transition-all duration-200 ease-out group mx-auto'>
                 <Input
                     id='header-search'
                     ref={inputRef}
                     type='text'
-                    placeholder='Search servers...'
+                    placeholder={t('dashboard.search_placeholder')}
                     value={searchValue}
                     onChange={handleChange}
-                    className='pl-10 pr-16 mx-auto w-full group-focus-within:w-full transition-all duration-200 ease-out '
+                    className='pl-10 pr-16 mx-auto w-full min-w-0 group-focus-within:w-full transition-all duration-200 ease-out '
                 />
                 <SearchIcon />
                 {!searchValue && (

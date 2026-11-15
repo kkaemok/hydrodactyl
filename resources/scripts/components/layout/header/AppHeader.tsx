@@ -5,13 +5,16 @@ import Logo from '@/components/elements/HydroLogo';
 import { Button } from '@/components/ui/button';
 import { useHeader } from '@/contexts/HeaderContext';
 import { useSidebar } from '@/contexts/SidebarContext';
+import { useTranslation } from '@/i18n/I18nProvider';
 
 import { MobileSidebarToggle } from '../sidebar/MobileSidebar';
 import '../sidebar/sidebar-modern.css';
+import ThemeToggle from './ThemeToggle';
 import UserDropdown from './UserDropdown';
 
 interface AppHeaderProps {
     serverId?: string;
+    admin?: boolean;
 }
 
 const HeaderActions = memo(() => {
@@ -40,19 +43,31 @@ const getSiteName = () => {
         : 'Hydrodactyl';
 };
 
-const LogoSection = memo(() => {
+const LogoSection = memo(({ admin }: { admin?: boolean }) => {
     const siteName = getSiteName();
+    const { t } = useTranslation();
+    const className = 'sidebar-logo-link flex items-center shrink-0 h-8 min-w-0 gap-3 hydrodactyl';
 
-    return (
-        <NavLink
-            to={'/'}
-            className='sidebar-logo-link flex items-center shrink-0 h-8 min-w-0 gap-3 hydrodactyl'
-            aria-label={`${siteName} home page`}
-        >
+    const content = (
+        <>
             <Logo className='flex h-8 w-8 shrink-0 object-contain' />
-            <span className='sidebar-logo-name hydrodactyl-logo content-center truncate text-sm font-semibold leading-none tracking-wide text-cream-50'>
+            <span className='sidebar-logo-name hydrodactyl-logo content-center truncate text-sm font-semibold leading-tight tracking-wide text-cream-50'>
                 {siteName}
             </span>
+        </>
+    );
+
+    if (admin) {
+        return (
+            <a href='/' className={className} aria-label={t('panel.home_page', { name: siteName })}>
+                {content}
+            </a>
+        );
+    }
+
+    return (
+        <NavLink to={'/'} className={className} aria-label={t('panel.home_page', { name: siteName })}>
+            {content}
         </NavLink>
     );
 });
@@ -60,13 +75,14 @@ LogoSection.displayName = 'LogoSection';
 
 const ToggleButton = memo(() => {
     const { toggleMinimized } = useSidebar();
+    const { t } = useTranslation();
 
     return (
         <Button
             variant={'secondary'}
             size={'sm'}
             className='sidebar-toggle-button p-1 gap-1 rounded-full size-8'
-            aria-label='Toggle sidebar'
+            aria-label={t('panel.toggle_sidebar')}
             onClick={toggleMinimized}
         >
             <LayoutSideContent width={16} height={16} />
@@ -75,18 +91,23 @@ const ToggleButton = memo(() => {
 });
 ToggleButton.displayName = 'ToggleButton';
 
-const SidebarLogo = memo(() => {
+const SidebarLogo = memo(({ admin }: { admin?: boolean }) => {
     return (
         <div className='sidebar-logo-container hidden lg:flex h-12 items-center flex-none relative'>
-            <LogoSection />
+            <LogoSection admin={admin} />
             <ToggleButton />
         </div>
     );
 });
 SidebarLogo.displayName = 'SidebarLogo';
 
-const StaticButtons = memo<{ serverId?: string }>(({ serverId }) => {
-    return <UserDropdown serverId={serverId} />;
+const StaticButtons = memo<{ serverId?: string; admin?: boolean }>(({ serverId, admin }) => {
+    return (
+        <>
+            <ThemeToggle />
+            <UserDropdown serverId={serverId} admin={admin} />
+        </>
+    );
 });
 
 StaticButtons.displayName = 'StaticButtons';
@@ -108,7 +129,7 @@ const SlotActions = memo<{ actions: React.ReactNode }>(({ actions }) => {
 });
 SlotActions.displayName = 'SlotActions';
 
-const AppHeader = ({ serverId }: AppHeaderProps) => {
+const AppHeader = ({ serverId, admin }: AppHeaderProps) => {
     const { headerActions, leftActions, centerActions, rightActions } = useHeader();
 
     const hasSlottedLayout = !headerActions && (leftActions || centerActions || rightActions);
@@ -116,16 +137,18 @@ const AppHeader = ({ serverId }: AppHeaderProps) => {
     // Dashboard Page
     if (hasSlottedLayout) {
         return (
-            <div className='h-16 w-full py-4 pr-2 flex align-middle items-center justify-between'>
-                <div className='flex items-center gap-2'>
-                    <SidebarLogo />
+            <div className='h-16 w-full py-4 pr-2 flex items-center justify-between'>
+                <div className='flex min-w-0 items-center gap-2'>
+                    <SidebarLogo admin={admin} />
                     <MobileSidebarToggle />
                     <SlotActions actions={leftActions} />
                 </div>
-                <SlotActions actions={centerActions} />
-                <div className='flex items-center gap-1.5 sm:gap-2 justify-end min-w-0 overflow-hidden'>
+                <div className='flex min-w-0 flex-1 items-center justify-center px-2'>
+                    <SlotActions actions={centerActions} />
+                </div>
+                <div className='ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2 justify-end'>
                     <SlotActions actions={rightActions} />
-                    <StaticButtons serverId={serverId} />
+                    <StaticButtons serverId={serverId} admin={admin} />
                 </div>
             </div>
         );
@@ -133,15 +156,15 @@ const AppHeader = ({ serverId }: AppHeaderProps) => {
 
     // Servers page
     return (
-        <div className='h-16 w-full py-4 pr-2 flex align-middle items-center'>
-            <div className='flex items-center gap-2 flex-1'>
+        <div className='h-16 w-full py-4 pr-2 flex items-center gap-3'>
+            <div className='flex grow shrink-0 basis-0 items-center gap-2'>
                 <MobileSidebarToggle />
-                <SidebarLogo />
+                <SidebarLogo admin={admin} />
             </div>
             <HeaderActions />
-            <div className='flex items-center gap-1.5 sm:gap-2 justify-end min-w-0 overflow-hidden flex-1'>
+            <div className='flex grow shrink-0 basis-0 items-center gap-1.5 sm:gap-2 justify-end'>
                 <SlotActions actions={rightActions} />
-                <StaticButtons serverId={serverId} />
+                <StaticButtons serverId={serverId} admin={admin} />
             </div>
         </div>
     );
