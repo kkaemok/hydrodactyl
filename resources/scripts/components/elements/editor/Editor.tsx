@@ -13,7 +13,7 @@ import {
 } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
 import { lintKeymap } from '@codemirror/lint';
-import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
+import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
 import type { Extension } from '@codemirror/state';
 import { Compartment, EditorState } from '@codemirror/state';
 import {
@@ -27,9 +27,11 @@ import {
     keymap,
     lineNumbers,
     rectangularSelection,
+    scrollPastEnd,
 } from '@codemirror/view';
 import type { CSSProperties } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAppearance } from '@/contexts/AppearanceContext';
 
 import { ayuMirageHighlightStyle, ayuMirageTheme } from './theme';
 
@@ -43,10 +45,6 @@ function findLanguageByFilename(filename: string): LanguageDescription | undefin
 }
 
 const defaultExtensions: Extension = [
-    // Ayu Mirage
-    ayuMirageTheme,
-    syntaxHighlighting(ayuMirageHighlightStyle),
-
     lineNumbers(),
     highlightActiveLineGutter(),
     highlightSpecialChars(),
@@ -64,6 +62,10 @@ const defaultExtensions: Extension = [
     crosshairCursor(),
     highlightActiveLine(),
     highlightSelectionMatches(),
+    // Keymap alone does nothing visible until search state exists. Ctrl-F opens this panel.
+    search({ top: true }),
+    EditorView.lineWrapping,
+    scrollPastEnd(),
     keymap.of([
         ...closeBracketsKeymap,
         ...defaultKeymap,
@@ -75,7 +77,9 @@ const defaultExtensions: Extension = [
         indentWithTab,
     ]),
     EditorState.tabSize.of(4),
-    indentUnit.of('\t'),
+    // Spaces, not a literal tab. Game configs (yaml, json, properties) almost all want this,
+    // and existing tab characters in a file are left alone.
+    indentUnit.of('    '),
 ];
 
 export interface EditorProps {
@@ -100,6 +104,8 @@ export interface EditorProps {
 }
 
 export default function Editor(props: EditorProps) {
+    const { theme } = useAppearance();
+    const [appearanceConfig] = useState(new Compartment());
     const ref = useRef<HTMLDivElement>(null);
 
     const [view, setView] = useState<EditorView>();
@@ -110,16 +116,20 @@ export default function Editor(props: EditorProps) {
 
     const [languageSupport, setLanguageSupport] = useState<LanguageSupport>();
 
-    const createEditorState = () =>
-        EditorState.create({
-            doc: props.initialContent,
-            extensions: [
-                defaultExtensions,
-                props.extensions === undefined ? [] : props.extensions,
-                languageConfig.of(languageSupport ?? []),
-                keybindings.of([]),
-            ],
-        });
+    const createEditorState = useCallback(
+        () =>
+            EditorState.create({
+                doc: props.initialContent,
+                extensions: [
+                    defaultExtensions,
+                    appearanceConfig.of([]),
+                    props.extensions === undefined ? [] : props.extensions,
+                    languageConfig.of(languageSupport ?? []),
+                    keybindings.of([]),
+                ],
+            }),
+        [props.initialContent, props.extensions, languageSupport, languageConfig, keybindings, appearanceConfig],
+    );
 
     useEffect(() => {
         if (ref.current === null) {
@@ -146,8 +156,41 @@ export default function Editor(props: EditorProps) {
             view.destroy();
             setView(undefined);
         };
-        // biome-ignore lint/correctness/useExhaustiveDependencies: createEditorState is stable via useCallback
     }, [view, createEditorState]);
+
+    // biome-ignore lint/correctness/useExhaustiveDependencies: setState replaces the compartments when createEditorState changes.
+    useEffect(() => {
+        view?.dispatch({
+            effects: appearanceConfig.reconfigure(
+                theme === 'dark'
+                    ? [ayuMirageTheme, syntaxHighlighting(ayuMirageHighlightStyle)]
+                    : [
+                          EditorView.theme(
+                              {
+                                  '&': {
+                                      color: 'var(--color-primary)',
+                                      backgroundColor: 'var(--color-bg-raised)',
+                                      height: '100%',
+                                      fontSize: '13px',
+                                  },
+                                  '.cm-scroller': {
+                                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                                      lineHeight: '1.5',
+                                      overflow: 'auto',
+                                  },
+                                  '.cm-gutters': {
+                                      color: 'var(--color-secondary)',
+                                      backgroundColor: 'var(--color-bg-lowered)',
+                                      border: 'none',
+                                  },
+                              },
+                              { dark: false },
+                          ),
+                          syntaxHighlighting(defaultHighlightStyle),
+                      ],
+            ),
+        });
+    }, [view, theme, appearanceConfig, createEditorState]);
 
     useEffect(() => {
         if (view === undefined) {

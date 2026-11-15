@@ -1,3 +1,5 @@
+import { Copy01Icon, Tick02Icon } from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -6,11 +8,16 @@ import { useSidebar } from '@/contexts/SidebarContext';
 import '@xterm/xterm/css/xterm.css';
 import './console.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { useDebouncedCallback } from 'use-debounce';
 
 import SpinnerOverlay from '@/components/elements/SpinnerOverlay';
+import { getTerminalBufferText } from '@/components/server/console/consoleBuffer';
 import { SocketEvent, SocketRequest } from '@/components/server/events';
+import { Button } from '@/components/ui/button';
 import KeyboardShortcut from '@/components/ui/keyboard-shortcut';
+import { useAppearance } from '@/contexts/AppearanceContext';
+import { useTranslation } from '@/i18n/I18nProvider';
 
 import { cn } from '@/lib/utils';
 import { usePermissions } from '@/plugins/usePermissions';
@@ -19,8 +26,7 @@ import { ScrollDownHelperAddon } from '@/plugins/XtermScrollDownHelperAddon';
 import { ServerContext } from '@/state/server';
 
 const theme = {
-    // background: 'rgba(0, 0, 0, 0)',
-    background: '#110f0d',
+    background: '#00000000',
     cursor: 'transparent',
     black: '#000000',
     red: '#E54B4B',
@@ -56,6 +62,8 @@ const terminalProps: ITerminalOptions = {
 };
 
 const Console = () => {
+    const { theme: appearanceTheme } = useAppearance();
+    const { t } = useTranslation();
     const TERMINAL_PRELUDE = '\u001b[1m\u001b[33mcontainer@hydrodactyl~ \u001b[0m';
     const ref = useRef<HTMLDivElement>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
@@ -63,15 +71,56 @@ const Console = () => {
     const fitAddon = useMemo(() => new FitAddon(), []);
     const searchAddon = useMemo(() => new SearchAddon(), []);
     const webLinksAddon = useMemo(() => new WebLinksAddon(), []);
-    const scrollDownHelperAddon = useMemo(() => new ScrollDownHelperAddon(), []);
+    const latestT = useRef(t);
+    useEffect(() => {
+        latestT.current = t;
+    }, [t]);
+    const scrollDownHelperAddon = useMemo(
+        () =>
+            new ScrollDownHelperAddon(() => ({
+                ariaLabel: latestT.current('server.console.scroll_aria'),
+                title: latestT.current('server.console.scroll_title'),
+            })),
+        [],
+    );
     const { connected, instance } = ServerContext.useStoreState((state) => state.socket);
     const [canSendCommands] = usePermissions(['control.console']);
     const serverId = ServerContext.useStoreState((state) => state.server.data?.id);
     const isTransferring = ServerContext.useStoreState((state) => state.server.data?.isTransferring);
     const [history, setHistory] = usePersistedState<string[]>(`${serverId}:command_history`, []);
     const [historyIndex, setHistoryIndex] = useState(-1);
+    const [copiedConsole, setCopiedConsole] = useState(false);
+    const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const { isMinimized: _isMinimized } = useSidebar();
     const inputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        terminal.options.theme =
+            appearanceTheme === 'dark'
+                ? theme
+                : {
+                      ...theme,
+                      background: '#00000000',
+                      foreground: '#27272a',
+                      black: '#27272a',
+                      white: '#52525b',
+                      brightBlack: '#62626b',
+                      brightWhite: '#27272a',
+                      red: '#a41331',
+                      brightRed: '#a41331',
+                      green: '#25633b',
+                      brightGreen: '#25633b',
+                      yellow: '#795000',
+                      brightYellow: '#795000',
+                      blue: '#1d4ed8',
+                      brightBlue: '#1d4ed8',
+                      magenta: '#7e22a0',
+                      brightMagenta: '#7e22a0',
+                      cyan: '#006577',
+                      brightCyan: '#006577',
+                      selectionBackground: '#d9edff',
+                  };
+    }, [appearanceTheme, terminal]);
 
     const debouncedFit = useDebouncedCallback(() => {
         // FIXME: The proposeDimensions & fit functions seemingly only go one column at a time (until it stabilizes)
@@ -117,11 +166,11 @@ const Console = () => {
             switch (status) {
                 // Sent by either the source or target node if a failure occurs.
                 case 'failure':
-                    terminal.writeln(`${TERMINAL_PRELUDE}Transfer has failed.\u001b[0m`);
+                    terminal.writeln(`${TERMINAL_PRELUDE}${t('server.console.transfer_failed')}\u001b[0m`);
                     return;
             }
         },
-        [terminal],
+        [terminal, t],
     );
 
     const handleDaemonErrorOutput = useCallback(
@@ -131,8 +180,9 @@ const Console = () => {
     );
 
     const handlePowerChangeEvent = useCallback(
-        (state: string) => terminal.writeln(`${TERMINAL_PRELUDE}Server marked as ${state}...\u001b[0m`),
-        [terminal],
+        (state: string) =>
+            terminal.writeln(`${TERMINAL_PRELUDE}${t('server.console.server_marked_as', { state })}\u001b[0m`),
+        [terminal, t],
     );
 
     const handleCommandKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -208,6 +258,44 @@ const Console = () => {
             document.removeEventListener('copy', handleCopy);
         };
     }, [handleGlobalKeyDown, handleCopy]);
+
+    // Copy the entire console buffer (including scrollback) in one click, so
+    // users don't have to scroll up and select the output by hand.
+    const handleCopyConsole = useCallback(() => {
+        const content = getTerminalBufferText(terminal.buffer.active);
+
+        if (!content) {
+            toast.error(t('server.console.nothing_to_copy'));
+            return;
+        }
+
+        if (!navigator.clipboard) {
+            toast.error(t('server.console.clipboard_unavailable'));
+            return;
+        }
+
+        navigator.clipboard
+            .writeText(content)
+            .then(() => {
+                setCopiedConsole(true);
+                toast.success(t('server.console.copied_to_clipboard'));
+
+                if (copyResetTimerRef.current) {
+                    clearTimeout(copyResetTimerRef.current);
+                }
+                copyResetTimerRef.current = setTimeout(() => setCopiedConsole(false), 2000);
+            })
+            .catch(() => toast.error(t('server.console.copy_failed')));
+    }, [terminal, t]);
+
+    useEffect(
+        () => () => {
+            if (copyResetTimerRef.current) {
+                clearTimeout(copyResetTimerRef.current);
+            }
+        },
+        [],
+    );
 
     // Auto-focus input on component mount
     useEffect(() => {
@@ -345,11 +433,29 @@ const Console = () => {
                         // stutters on phones), and overscroll-behavior:contain keeps it from
                         // chaining to the page. Desktop (mouse) is untouched. This is the
                         // "separate the xterm console from the console page" behaviour.
-                        'console-terminal-host bg-bg-raised border-mocha-400 p-4 flex min-h-65 lg:flex-1 lg:min-h-0 flex-col overflow-hidden rounded-t-2xl border text-sm',
+                        'console-terminal-host bg-bg-raised border-mocha-400 p-4 flex min-h-65 lg:flex-1 lg:min-h-0 flex-col overflow-hidden rounded-t-2xl border text-sm relative',
                         canSendCommands ? 'rounded-b-none border-b-0' : 'rounded-b-2xl',
                     )}
                 >
                     <div className='h-full' ref={ref} />
+                    <Button
+                        type='button'
+                        variant='secondary'
+                        size='sm'
+                        shape='round'
+                        className='absolute top-4 right-4 z-20 gap-1.5 bg-mocha-400/90 backdrop-blur'
+                        onClick={handleCopyConsole}
+                        aria-label={t('server.console.copy_full_output')}
+                        title={t('server.console.copy_full_output')}
+                    >
+                        <HugeiconsIcon
+                            size={16}
+                            strokeWidth={2}
+                            icon={copiedConsole ? Tick02Icon : Copy01Icon}
+                            className='size-4'
+                        />
+                        {copiedConsole ? t('server.console.copied') : t('server.console.copy')}
+                    </Button>
                 </div>
 
                 {canSendCommands && (
@@ -358,8 +464,8 @@ const Console = () => {
                             ref={inputRef}
                             className='w-full'
                             type={'text'}
-                            placeholder={'Enter a command'}
-                            aria-label={'Console command input.'}
+                            placeholder={t('server.console.enter_command')}
+                            aria-label={t('server.console.command_input_aria')}
                             disabled={!instance || !connected}
                             onKeyDown={handleCommandKeyDown}
                             autoCorrect={'off'}

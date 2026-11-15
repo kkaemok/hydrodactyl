@@ -4,7 +4,7 @@ import { Ellipsis } from '@gravity-ui/icons';
 import { useStoreState } from 'easy-peasy';
 import type { RefObject } from 'react';
 import { createRef, Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { Navigate, NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import http, { httpErrorToHuman } from '@/api/http';
 import { getSubdomainInfo } from '@/api/server/network/subdomain';
 import CommandMenu from '@/components/elements/commandk/CmdK';
@@ -29,6 +29,7 @@ import InstallListener from '@/components/server/InstallListener';
 import ServerSidebarNavItem from '@/components/server/ServerSidebarNavItem';
 import TransferListener from '@/components/server/TransferListener';
 import WebsocketHandler from '@/components/server/WebsocketHandler';
+import { useTranslation } from '@/i18n/I18nProvider';
 import routes, { getServerNavRoutes, type ServerRouteDefinition } from '@/routers/routes';
 
 import { ServerContext } from '@/state/server';
@@ -36,6 +37,7 @@ import { ServerContext } from '@/state/server';
 const ServerRouter = () => {
     const params = useParams<'id'>();
     const location = useLocation();
+    const { t } = useTranslation();
 
     const rootAdmin = useStoreState((state) => state.user.data?.rootAdmin);
     const [error, setError] = useState('');
@@ -51,6 +53,7 @@ const ServerRouter = () => {
     const databaseLimit = ServerContext.useStoreState((state) => state.server.data?.featureLimits.databases);
     const backupLimit = ServerContext.useStoreState((state) => state.server.data?.featureLimits.backups);
     const allocationLimit = ServerContext.useStoreState((state) => state.server.data?.featureLimits.allocations);
+    const softwareEnabled = ServerContext.useStoreState((state) => state.server.data?.softwareEnabled);
 
     // Mobile menu state
     const [isMobileMenuVisible, setMobileMenuVisible] = useState(false);
@@ -90,7 +93,7 @@ const ServerRouter = () => {
     };
 
     const onSelectManageServer = () => {
-        window.open(`/admin/servers/view/${serverId}`);
+        window.open(`/admin/servers/${serverId}`);
     };
 
     useEffect(
@@ -248,7 +251,7 @@ const ServerRouter = () => {
         <Fragment key={'server-router'}>
             {!uuid || !id ? (
                 error ? (
-                    <ServerError title='Something went wrong' message={error} />
+                    <ServerError title={t('errors.something_went_wrong')} message={error} />
                 ) : null
             ) : (
                 <>
@@ -290,14 +293,16 @@ const ServerRouter = () => {
                                     <DropdownMenuContent className='z-99999 select-none relative' sideOffset={8}>
                                         {rootAdmin && (
                                             <DropdownMenuItem onSelect={onSelectManageServer}>
-                                                Manage Server
+                                                {t('panel.manage_server')}
                                                 <span className='ml-2 z-10 rounded-full bg-brand px-2 py-1 text-xs select-none'>
-                                                    Staff
+                                                    {t('panel.staff')}
                                                 </span>
                                             </DropdownMenuItem>
                                         )}
                                         <DropdownMenuSeparator />
-                                        <DropdownMenuItem onSelect={onTriggerLogout}>Log Out</DropdownMenuItem>
+                                        <DropdownMenuItem onSelect={onTriggerLogout}>
+                                            {t('panel.log_out')}
+                                        </DropdownMenuItem>
                                     </DropdownMenuContent>
                                 </DropdownMenu>
                             </div>
@@ -343,7 +348,7 @@ const ServerRouter = () => {
                             <div className='shrink-0'>
                                 <div aria-hidden className='mt-8 mb-4 bg-[#ffffff33] min-h-[1px] w-full'></div>
                                 <StatBlock
-                                    title='server'
+                                    title={t('server.console.sidebar_label')}
                                     className='p-4 bg-[#ffffff09] border-[1px] border-[#ffffff11] shadow-xs rounded-xl text-center hover:cursor-default'
                                 >
                                     {serverName}
@@ -367,19 +372,25 @@ const ServerRouter = () => {
                                 ) : (
                                     <ErrorBoundary>
                                         <Routes location={location}>
-                                            {routes.server.map(({ route, permission, component: Component }) => (
-                                                <Route
-                                                    key={route}
-                                                    path={route}
-                                                    element={
-                                                        <PermissionRoute permission={permission ?? undefined}>
-                                                            <Suspense fallback={null}>
-                                                                <Component />
-                                                            </Suspense>
-                                                        </PermissionRoute>
-                                                    }
-                                                />
-                                            ))}
+                                            {routes.server.map(
+                                                ({ route, permission, component: Component, requiresSoftware }) => (
+                                                    <Route
+                                                        key={route}
+                                                        path={route}
+                                                        element={
+                                                            requiresSoftware && softwareEnabled === false ? (
+                                                                <Navigate to={`/server/${id}`} replace />
+                                                            ) : (
+                                                                <PermissionRoute permission={permission ?? undefined}>
+                                                                    <Suspense fallback={null}>
+                                                                        <Component />
+                                                                    </Suspense>
+                                                                </PermissionRoute>
+                                                            )
+                                                        }
+                                                    />
+                                                ),
+                                            )}
 
                                             <Route path='*' element={<NotFound />} />
                                         </Routes>

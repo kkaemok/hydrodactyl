@@ -51,11 +51,15 @@ export interface Server {
         backupStorageMb: number | null;
     };
     isTransferring: boolean;
+    softwareEnabled: boolean;
     variables: ServerEggVariable[];
     allocations: Allocation[];
     egg: string;
     daemonType: string;
     group: ServerGroupMembership | null;
+    allowedWebhookTypes: Record<string, string>;
+    webhookType: string | null;
+    webhookUrl: string | null;
 }
 
 export const rawDataToServerObject = ({ attributes: data }: FractalResponseData): Server => ({
@@ -77,6 +81,7 @@ export const rawDataToServerObject = ({ attributes: data }: FractalResponseData)
     eggFeatures: data.egg_features || [],
     featureLimits: { ...data.feature_limits },
     isTransferring: data.is_transferring,
+    softwareEnabled: data.software_enabled !== false,
     variables: ((data.relationships?.variables as FractalResponseList | undefined)?.data || []).map(
         rawDataToServerEggVariable,
     ),
@@ -86,15 +91,21 @@ export const rawDataToServerObject = ({ attributes: data }: FractalResponseData)
     egg: data.egg,
     daemonType: data.daemonType,
     group: data.groups ? { id: data.groups.id, name: data.groups.name } : null,
+    allowedWebhookTypes: data.allowedWebhookTypes,
+    webhookType: data.webhook_type || null,
+    webhookUrl: data.webhook_url || null,
 });
 
 export default async (uuid: string): Promise<[Server, string[]]> => {
     let daemonType_api = 'elytra';
+    let allowedWebhookTypes_api: Record<string, string> = {};
     return http
         .get(`/api/client/servers/${uuid}`)
         .then((response) => {
             daemonType_api = response.data?.meta.daemonType;
             const daemonType: string = response.data?.meta.daemonType;
+
+            allowedWebhookTypes_api = response.data?.meta.allowed_webhook_types || {};
 
             if (daemonType) {
                 globalDaemonType = daemonType;
@@ -107,6 +118,7 @@ export default async (uuid: string): Promise<[Server, string[]]> => {
 
             const server = rawDataToServerObject(payload);
             server.daemonType = daemonType_api;
+            server.allowedWebhookTypes = allowedWebhookTypes_api;
 
             const permissions = payload.meta?.is_server_owner
                 ? ['*']

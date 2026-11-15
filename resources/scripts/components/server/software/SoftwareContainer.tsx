@@ -2,21 +2,21 @@ import { useEffect, useMemo, useState } from 'react';
 import isEqual from 'react-fast-compare';
 import { toast } from 'sonner';
 import { httpErrorToHuman } from '@/api/http';
-import getNests from '@/api/nests/getNests';
 import applyEggChange from '@/api/server/applyEggChange';
-import applyEggChangeSync from '@/api/server/applyEggChangeSync';
 import { getGlobalDaemonType } from '@/api/server/getServer';
 import previewEggChange, { type EggPreview } from '@/api/server/previewEggChange';
 import type { ServerOperation } from '@/api/server/serverOperations';
 import getServerBackups from '@/api/swr/getServerBackups';
 import getServerStartup from '@/api/swr/getServerStartup';
-import { MainPageHeader } from '@/components/elements/MainPageHeader';
 import ServerContentBlock from '@/components/elements/ServerContentBlock';
 import Spinner from '@/components/elements/Spinner';
 import ServerHeader from '@/components/server/header/ServerHeader';
 import OperationProgressModal from '@/components/server/operations/OperationProgressModal';
 import WingsOperationProgressModal from '@/components/server/operations/WingsOperationProgressModal';
+import { useTranslation } from '@/i18n/I18nProvider';
 import { useDeepCompareEffect } from '@/plugins/useDeepCompareEffect';
+import { useNests } from '@/plugins/useNests';
+import { usePermissions } from '@/plugins/usePermissions';
 import { ServerContext } from '@/state/server';
 import GameSelection from './GameSelection';
 import ReviewChanges from './ReviewChanges';
@@ -28,10 +28,36 @@ import { validateEnvironmentVariables } from './types';
 import WipeConfirmationModal from './WipeConfirmationModal';
 
 const SoftwareContainer = () => {
+    const { t } = useTranslation();
     const serverData = ServerContext.useStoreState((state) => state.server.data);
     const daemonType = getGlobalDaemonType();
     const uuid = serverData?.uuid;
-    const [nests, setNests] = useState<Nest[]>();
+    const [
+        canEditStartupCommand = false,
+        canReadStartup = false,
+        canUpdateStartup = false,
+        canChangeDockerImage = false,
+        canReinstall = false,
+        canReadBackups = false,
+        canCreateBackups = false,
+        canReadFiles = false,
+        canDeleteFiles = false,
+    ] = usePermissions([
+        'startup.command',
+        'startup.read',
+        'startup.update',
+        'startup.docker-image',
+        'settings.reinstall',
+        'backup.read',
+        'backup.create',
+        'file.read',
+        'file.delete',
+    ]);
+    const canCustomizeStartup = canEditStartupCommand;
+    const canCreateBackupOption = canCreateBackups;
+    const canWipeFilesOption = canReadFiles && canDeleteFiles;
+    const missingBasePermissions = !canReadStartup || !canUpdateStartup || !canChangeDockerImage || !canReinstall;
+    const { data: nests } = useNests();
     const currentEgg = serverData?.egg;
     const currentEggName = useMemo(() => {
         if (!nests || !currentEgg) return undefined;
@@ -45,7 +71,7 @@ const SoftwareContainer = () => {
     }, [nests, currentEgg]);
     const backupLimit = serverData?.featureLimits.backups;
 
-    const { data: backups } = getServerBackups();
+    const { data: backups } = getServerBackups(canReadBackups);
     const setServerFromState = ServerContext.useStoreActions((actions) => actions.server.setServerFromState);
 
     const [currentStep, setCurrentStep] = useState<FlowStep>('overview');
@@ -68,13 +94,12 @@ const SoftwareContainer = () => {
     const [customStartup, setCustomStartup] = useState('');
     const [selectedDockerImage, setSelectedDockerImage] = useState('');
 
-    useEffect(() => {
-        const fetchData = async () => {
-            const data = await getNests();
-            setNests(data);
-        };
-        fetchData();
-    }, []);
+    const hasCustomStartup = !!eggPreview && !!customStartup && customStartup !== eggPreview.egg.startup;
+    const canApplyChanges =
+        !missingBasePermissions &&
+        !(shouldBackup && !canCreateBackups) &&
+        !(shouldWipe && !canWipeFilesOption) &&
+        !(hasCustomStartup && !canCustomizeStartup);
 
     const variables = ServerContext.useStoreState(
         ({ server }) => ({
@@ -101,10 +126,21 @@ const SoftwareContainer = () => {
     }, [data]);
 
     useEffect(() => {
+        if (!canCreateBackups) {
+            setShouldBackup(false);
+            return;
+        }
+
         if (backups) {
             setShouldBackup(backupLimit !== 0 && (backupLimit === null || backups.backupCount < backupLimit));
         }
-    }, [backups, backupLimit]);
+    }, [backups, backupLimit, canCreateBackups]);
+
+    useEffect(() => {
+        if (!canWipeFilesOption) {
+            setShouldWipe(false);
+        }
+    }, [canWipeFilesOption]);
 
     useEffect(() => {
         let interval: NodeJS.Timeout;
@@ -165,14 +201,14 @@ const SoftwareContainer = () => {
         setCurrentStep('select-software');
     };
 
-    const handleEggSelection = async (egg: Egg) => {
-        if (!selectedNest || !uuid) return;
+    const handleEggSelection = async (egg: Egg, nest: Nest | null = selectedNest) => {
+        if (!nest || !uuid) return;
 
         setIsLoading(true);
         setSelectedEgg(egg);
 
         try {
-            const preview = await previewEggChange(uuid, egg.attributes.id, selectedNest.attributes.id);
+            const preview = await previewEggChange(uuid, egg.attributes.id, nest.attributes.id);
             setEggPreview(preview);
 
             if (preview.warnings && preview.warnings.length > 0) {
@@ -210,15 +246,30 @@ const SoftwareContainer = () => {
         }
     };
 
+    const handleGlobalEggSelection = (nest: Nest, egg: Egg) => {
+        setSelectedNest(nest);
+        setSelectedEgg(null);
+        setEggPreview(null);
+        setPendingVariables({});
+        setVariableErrors({});
+        setCustomStartup('');
+        setSelectedDockerImage('');
+        handleEggSelection(egg, nest);
+    };
+
     const handleVariableChange = (envVariable: string, value: string) => {
         setPendingVariables((prev) => ({ ...prev, [envVariable]: value }));
 
         if (eggPreview) {
             const variable = eggPreview.variables.find((v) => v.env_variable === envVariable);
             if (variable) {
-                const errors = validateEnvironmentVariables([variable], {
-                    [envVariable]: value,
-                });
+                const errors = validateEnvironmentVariables(
+                    [variable],
+                    {
+                        [envVariable]: value,
+                    },
+                    t,
+                );
                 setVariableErrors((prev) => {
                     const newErrors = { ...prev };
                     if (errors.length > 0 && errors[0]) {
@@ -239,6 +290,11 @@ const SoftwareContainer = () => {
     const applyChanges = async () => {
         if (!selectedEgg || !selectedNest || !eggPreview) return;
 
+        if (!canApplyChanges) {
+            toast.error(t('server.software.configuration.missing_permissions'));
+            return;
+        }
+
         if (shouldWipe && !shouldBackup) {
             setShowWipeConfirmation(true);
             return;
@@ -253,10 +309,10 @@ const SoftwareContainer = () => {
         setIsLoading(true);
 
         try {
-            const validationErrors = validateEnvironmentVariables(eggPreview.variables, pendingVariables);
+            const validationErrors = validateEnvironmentVariables(eggPreview.variables, pendingVariables, t);
 
             if (validationErrors.length > 0) {
-                throw new Error(`Validation failed:\n${validationErrors.join('\n')}`);
+                throw new Error(`${t('server.software.validation.failed')}:\n${validationErrors.join('\n')}`);
             }
 
             const actualDockerImage =
@@ -266,39 +322,52 @@ const SoftwareContainer = () => {
                       ? eggPreview.docker_images[eggPreview.default_docker_image]
                       : '';
 
+            const editableVariables = new Set(
+                eggPreview.variables
+                    .filter((variable) => variable.user_viewable && variable.user_editable)
+                    .map((variable) => variable.env_variable),
+            );
+
             const filteredEnvironment: Record<string, string> = {};
             Object.entries(pendingVariables).forEach(([key, value]) => {
-                if (value && value.trim() !== '') {
+                if (editableVariables.has(key) && value && value.trim() !== '') {
                     filteredEnvironment[key] = value;
                 }
             });
 
-            if (daemonType?.toLowerCase() === 'elytra') {
-                const response = await applyEggChange(uuid, {
-                    egg_id: selectedEgg.attributes.id,
-                    nest_id: selectedNest.attributes.id,
-                    docker_image: actualDockerImage,
-                    startup_command: customStartup,
-                    environment: filteredEnvironment,
-                    should_backup: shouldBackup,
-                    should_wipe: shouldWipe,
-                });
+            const startupCommand =
+                customStartup && customStartup !== eggPreview.egg.startup ? customStartup : undefined;
 
-                setCurrentOperationId(response.operation_id);
-                setShowOperationModal(true);
-            } else if (daemonType?.toLowerCase() === 'wings') {
-                await applyEggChangeSync(uuid, {
-                    egg_id: selectedEgg.attributes.id,
-                    nest_id: selectedNest.attributes.id,
-                    docker_image: actualDockerImage,
-                    startup_command: customStartup,
-                    environment: filteredEnvironment,
-                    should_backup: shouldBackup,
-                    should_wipe: shouldWipe,
-                });
+            if (!canReadStartup || !canUpdateStartup || !canChangeDockerImage || !canReinstall) {
+                throw new Error(t('server.software.configuration.missing_permissions'));
             }
 
-            toast.success('Software change operation started successfully');
+            if (shouldBackup && !canCreateBackups) {
+                throw new Error(t('server.software.configuration.missing_backup_permission'));
+            }
+
+            if (shouldWipe && (!canReadFiles || !canDeleteFiles)) {
+                throw new Error(t('server.software.configuration.missing_file_permission'));
+            }
+
+            if (startupCommand && !canCustomizeStartup) {
+                throw new Error(t('server.software.configuration.startup_command_forbidden'));
+            }
+
+            const response = await applyEggChange(uuid, {
+                egg_id: selectedEgg.attributes.id,
+                nest_id: selectedNest.attributes.id,
+                docker_image: actualDockerImage,
+                startup_command: startupCommand,
+                environment: filteredEnvironment,
+                should_backup: shouldBackup,
+                should_wipe: shouldWipe,
+            });
+
+            setCurrentOperationId(response.operation_id);
+            setShowOperationModal(true);
+
+            toast.success(t('server.software.operation_started'));
 
             resetFlow();
         } catch (error) {
@@ -317,15 +386,15 @@ const SoftwareContainer = () => {
 
     const handleOperationComplete = (operation: ServerOperation) => {
         if (operation.is_completed) {
-            toast.success('Your software configuration has been applied successfully');
+            toast.success(t('server.software.operation_success'));
             mutate();
         } else if (operation.has_failed) {
-            toast.error(operation.message || 'The software configuration change failed');
+            toast.error(operation.message || t('server.software.operation_failed'));
         }
     };
 
     const handleOperationError = (error: Error) => {
-        toast.error(error.message || 'An error occurred while monitoring the operation');
+        toast.error(error.message || t('server.software.operation_monitor_error'));
     };
 
     const closeOperationModal = () => {
@@ -337,107 +406,103 @@ const SoftwareContainer = () => {
 
     if (!serverData) {
         return (
-            <ServerContentBlock title='Software Management'>
-                <div className='flex items-center justify-center h-64'>
-                    <div className='flex flex-col items-center text-center'>
-                        <Spinner size='large' />
-                        <p className='text-neutral-400 mt-4'>Loading server information...</p>
-                    </div>
+            <div className='flex items-center justify-center h-64'>
+                <div className='flex flex-col items-center text-center'>
+                    <Spinner size='large' />
+                    <p className='text-cream-400/70 mt-4'>{t('server.software.loading')}</p>
                 </div>
-            </ServerContentBlock>
+            </div>
         );
     }
 
     return (
-        <ServerContentBlock title='Software Management'>
+        <ServerContentBlock className='p-0!' title={t('server.software.title')} showFlashKey={'Software'}>
             <ServerHeader />
-            <div className='space-y-6'>
-                <MainPageHeader direction='column' title='Software Management'>
-                    <p className='text-neutral-400 leading-relaxed'>
-                        Change your server&apos;s game or software with our guided configuration wizard
-                    </p>
-                </MainPageHeader>
+            <div className='px-2 pt-2 pb-6 sm:px-14 sm:pt-14'>
+                <div className='space-y-6'>
+                    <div className='relative'>
+                        {currentStep !== 'overview' && (
+                            <div className='absolute inset-x-0 top-0 z-10 h-1 overflow-hidden rounded-t-2xl bg-mocha-400'>
+                                <div
+                                    className='bg-brand h-full transition-all duration-300'
+                                    style={{
+                                        width: `${(steps.indexOf(currentStep) / 4) * 100}%`,
+                                    }}
+                                />
+                            </div>
+                        )}
 
-                {currentStep !== 'overview' && (
-                    <div className='p-4 bg-[#ffffff08] border border-[#ffffff12] rounded-lg'>
-                        <div className='flex items-center justify-between mb-2'>
-                            <span className='text-sm font-medium text-neutral-200 capitalize'>
-                                {currentStep.replace('-', ' ')}
-                            </span>
-                            <span className='text-sm text-neutral-400'>Step {steps.indexOf(currentStep)} of 4</span>
-                        </div>
-                        <div className='w-full bg-[#ffffff12] rounded-full h-2'>
-                            <div
-                                className='bg-brand h-2 rounded-full transition-all duration-300'
-                                style={{
-                                    width: `${(steps.indexOf(currentStep) / 4) * 100}%`,
-                                }}
-                            ></div>
-                        </div>
+                        {currentStep === 'overview' && (
+                            <SoftwareOverview
+                                currentEggName={currentEggName}
+                                isLoading={isLoading}
+                                onChangeSoftware={() => setCurrentStep('select-game')}
+                            />
+                        )}
+                        {currentStep === 'select-game' && (
+                            <GameSelection
+                                nests={nests || []}
+                                isLoading={isLoading}
+                                selectedEggUuid={selectedEgg?.attributes?.uuid}
+                                onSelectNest={handleNestSelection}
+                                onSelectSoftware={handleGlobalEggSelection}
+                                onBack={() => setCurrentStep('overview')}
+                            />
+                        )}
+                        {currentStep === 'select-software' && selectedNest && (
+                            <SoftwareSelection
+                                selectedNest={selectedNest}
+                                isLoading={isLoading}
+                                selectedEggUuid={selectedEgg?.attributes?.uuid}
+                                onSelectEgg={handleEggSelection}
+                                onBack={() => setCurrentStep('select-game')}
+                                onCancel={() => setCurrentStep('overview')}
+                            />
+                        )}
+                        {currentStep === 'configure' && selectedEgg && eggPreview && (
+                            <SoftwareConfiguration
+                                selectedEgg={selectedEgg}
+                                eggPreview={eggPreview}
+                                customStartup={customStartup}
+                                canEditStartupCommand={canCustomizeStartup}
+                                canCreateBackups={canCreateBackupOption}
+                                canWipeFiles={canWipeFilesOption}
+                                selectedDockerImage={selectedDockerImage}
+                                pendingVariables={pendingVariables}
+                                variableErrors={variableErrors}
+                                shouldBackup={shouldBackup}
+                                shouldWipe={shouldWipe}
+                                backupLimit={backupLimit}
+                                backupCount={backups?.backupCount || 0}
+                                onStartupChange={setCustomStartup}
+                                onDockerImageChange={setSelectedDockerImage}
+                                onVariableChange={handleVariableChange}
+                                onBackupChange={setShouldBackup}
+                                onWipeChange={setShouldWipe}
+                                onBack={() => setCurrentStep('select-software')}
+                                onReview={proceedToReview}
+                            />
+                        )}
+                        {currentStep === 'review' && selectedEgg && selectedNest && eggPreview && (
+                            <ReviewChanges
+                                selectedEgg={selectedEgg}
+                                selectedNest={selectedNest}
+                                eggPreview={eggPreview}
+                                currentEggName={currentEggName}
+                                customStartup={customStartup}
+                                selectedDockerImage={selectedDockerImage}
+                                pendingVariables={pendingVariables}
+                                shouldBackup={shouldBackup}
+                                shouldWipe={shouldWipe}
+                                isLoading={isLoading}
+                                canApply={canApplyChanges}
+                                blockedMessage={t('server.software.configuration.missing_permissions')}
+                                onBack={() => setCurrentStep('configure')}
+                                onApply={applyChanges}
+                            />
+                        )}
                     </div>
-                )}
-
-                {currentStep === 'overview' && (
-                    <SoftwareOverview
-                        currentEggName={currentEggName}
-                        isLoading={isLoading}
-                        onChangeSoftware={() => setCurrentStep('select-game')}
-                    />
-                )}
-                {currentStep === 'select-game' && (
-                    <GameSelection
-                        nests={nests || []}
-                        onSelectNest={handleNestSelection}
-                        onBack={() => setCurrentStep('overview')}
-                    />
-                )}
-                {currentStep === 'select-software' && selectedNest && (
-                    <SoftwareSelection
-                        selectedNest={selectedNest}
-                        isLoading={isLoading}
-                        selectedEggUuid={selectedEgg?.attributes?.uuid}
-                        onSelectEgg={handleEggSelection}
-                        onBack={() => setCurrentStep('select-game')}
-                        onCancel={() => setCurrentStep('overview')}
-                    />
-                )}
-                {currentStep === 'configure' && selectedEgg && eggPreview && (
-                    <SoftwareConfiguration
-                        selectedEgg={selectedEgg}
-                        eggPreview={eggPreview}
-                        customStartup={customStartup}
-                        selectedDockerImage={selectedDockerImage}
-                        pendingVariables={pendingVariables}
-                        variableErrors={variableErrors}
-                        shouldBackup={shouldBackup}
-                        shouldWipe={shouldWipe}
-                        backupLimit={backupLimit}
-                        backupCount={backups?.backupCount || 0}
-                        onStartupChange={setCustomStartup}
-                        onDockerImageChange={setSelectedDockerImage}
-                        onVariableChange={handleVariableChange}
-                        onBackupChange={setShouldBackup}
-                        onWipeChange={setShouldWipe}
-                        onBack={() => setCurrentStep('select-software')}
-                        onReview={proceedToReview}
-                    />
-                )}
-                {currentStep === 'review' && selectedEgg && selectedNest && eggPreview && (
-                    <ReviewChanges
-                        selectedEgg={selectedEgg}
-                        selectedNest={selectedNest}
-                        eggPreview={eggPreview}
-                        currentEggName={currentEggName}
-                        customStartup={customStartup}
-                        selectedDockerImage={selectedDockerImage}
-                        pendingVariables={pendingVariables}
-                        shouldBackup={shouldBackup}
-                        shouldWipe={shouldWipe}
-                        isLoading={isLoading}
-                        onBack={() => setCurrentStep('configure')}
-                        onApply={applyChanges}
-                    />
-                )}
+                </div>
             </div>
 
             <WipeConfirmationModal
@@ -453,24 +518,28 @@ const SoftwareContainer = () => {
                 <OperationProgressModal
                     visible={showOperationModal}
                     operationId={currentOperationId}
-                    operationType='Software Change'
+                    operationType={t('server.software.operation_type')}
                     onClose={closeOperationModal}
                     onComplete={handleOperationComplete}
                     onError={handleOperationError}
                 />
             )}
-            {daemonType === 'wings' && (
+            {(daemonType === 'wings' || daemonType === 'calagopus') && (
                 <WingsOperationProgressModal
                     visible={showOperationModal}
                     operationId={currentOperationId}
-                    operationType='Software Change'
+                    operationType={t('server.software.operation_type')}
                     onClose={closeOperationModal}
                     onComplete={handleOperationComplete}
                     onError={handleOperationError}
                 />
             )}
-            {daemonType !== 'elytra' && daemonType !== 'wings' && (
-                <div>Could not find Operation Modal for this daemon: Using ${daemonType}</div>
+            {daemonType !== 'elytra' && daemonType !== 'wings' && daemonType !== 'calagopus' && (
+                <div>
+                    {t('server.software.operation_modal_missing', {
+                        daemon: daemonType,
+                    })}
+                </div>
             )}
         </ServerContentBlock>
     );

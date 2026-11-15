@@ -37,9 +37,10 @@ class VerifyCaptcha
         if (empty($captchaResponse)) {
             Log::warning('Captcha verification failed - no response provided', [
                 'field_name' => $fieldName,
-                'request_data' => $request->all(),
+                'uri' => $request->getRequestUri(),
+                'ip' => $request->ip(),
             ]);
-            throw new DisplayException('Please complete the captcha verification.');
+            throw new DisplayException(__('exceptions.middleware.captcha_required'));
         }
 
         // Verify the captcha response
@@ -48,7 +49,7 @@ class VerifyCaptcha
 
         if (!$verificationResult) {
             Log::warning('Captcha verification failed - verification returned false');
-            throw new DisplayException('Captcha verification failed. Please try again.');
+            throw new DisplayException(__('exceptions.middleware.captcha_failed'));
         }
 
         return $next($request);

@@ -40,13 +40,13 @@ class BuildModificationService
                 try {
                     Allocation::query()->where('id', $data['allocation_id'])->where('server_id', $server->id)->firstOrFail();
                 } catch (ModelNotFoundException) {
-                    throw new DisplayException('The requested default allocation is not currently assigned to this server.');
+                    throw new DisplayException(__('exceptions.servers.default_allocation_not_assigned'));
                 }
             }
 
             // If any of these values are passed through in the data array go ahead and set
             // them correctly on the server model.
-            $merge = Arr::only($data, ['oom_disabled', 'exclude_from_resource_calculation', 'memory', 'overhead_memory', 'swap', 'io', 'cpu', 'threads', 'disk', 'allocation_id']);
+            $merge = Arr::only($data, ['oom_disabled', 'exclude_from_resource_calculation', 'software_enabled', 'memory', 'overhead_memory', 'swap', 'io', 'cpu', 'threads', 'disk', 'allocation_id']);
 
             $server->forceFill(array_merge($merge, [
                 'database_limit' => Arr::get($data, 'database_limit') === '' ? null : Arr::get($data, 'database_limit'),
@@ -108,7 +108,7 @@ class BuildModificationService
                 // will throw an exception back.
                 if ($allocation === ($data['allocation_id'] ?? $server->allocation_id)) {
                     if (empty($freshlyAllocated)) {
-                        throw new DisplayException('You are attempting to delete the default allocation for this server but there is no fallback allocation to use.');
+                        throw new DisplayException(__('admin/server.exceptions.no_new_default_allocation'));
                     }
 
                     // Update the default allocation to be the first allocation that we are creating.

@@ -5,21 +5,23 @@ import * as React from 'react';
 import { cn } from '../../lib/utils';
 
 const buttonVariants = cva(
-    'select-none border border-solid border-transparent inline-flex items-center transition justify-center whitespace-nowrap text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mocha-200 disabled:cursor-not-allowed disabled:opacity-50 hover:cursor-pointer hover:active:translate-y-0.5 hover:active:scale-[0.98]',
+    'select-none border border-solid border-transparent inline-flex items-center transition justify-center whitespace-nowrap text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mocha-200 disabled:cursor-not-allowed disabled:opacity-50 enabled:hover:cursor-pointer enabled:hover:active:translate-y-0.5 enabled:hover:active:scale-[0.98]',
     {
         variants: {
             variant: {
-                default: 'bg-cream-400 text-mocha-500 shadow-sm hover:bg-cream-500/80 hover:active:bg-cream-500/70',
-                destructive: 'bg-red-500 shadow-sm text-white hover:bg-red-500/90',
+                default:
+                    'bg-cream-400 text-mocha-500 shadow-sm enabled:hover:bg-cream-500/80 enabled:hover:active:bg-cream-500/70',
+                destructive: 'bg-red-500 shadow-sm text-white enabled:hover:bg-red-500/90',
                 attention:
-                    'bg-brand-400/60 text-mocha-500 shadow-sm hover:bg-brand-400/80 hover:active:bg-brand-400/70',
-                outline: 'border border-cream-400/80 hover:bg-mocha-300/50 hover:active:bg-mocha-300/20',
+                    'bg-brand-500 text-mocha-500 shadow-sm enabled:hover:bg-brand-400 enabled:hover:active:bg-brand-500/90',
+                outline:
+                    'border border-cream-400/80 enabled:hover:bg-mocha-300/50 enabled:hover:active:bg-mocha-300/20',
                 secondary:
-                    'bg-mocha-400 border border-mocha-300 text-cream-400 shadow-sm hover:bg-mocha-300 hover:active:bg-mocha-300/50',
-                ghost: 'hover:bg-cream-400 hover:text-mocha-500 hover:active:bg-cream-400/70',
-                link: 'text-cream-400 underline-offset-4 hover:underline',
-                spark: 'bg-linear-0 from-mocha-400 to-[#433B32] border-cream-500/20 text-cream-500 text-lg gap-3',
-                ember_faq: 'bg-linear-0 from-mocha-400 to-[#433B32] border-cream-500/20 text-cream-500 gap-3 text-2xl',
+                    'bg-mocha-400 border border-mocha-300 text-cream-400 shadow-sm enabled:hover:bg-mocha-300 enabled:hover:active:bg-mocha-300/50',
+                ghost: 'enabled:hover:bg-cream-400 enabled:hover:text-mocha-500 enabled:hover:active:bg-cream-400/70',
+                link: 'text-cream-400 underline-offset-4 enabled:hover:underline',
+                spark: 'bg-linear-0 from-mocha-400 to-mocha-300 border-cream-500/20 text-cream-500 text-lg gap-3',
+                ember_faq: 'bg-linear-0 from-mocha-400 to-mocha-300 border-cream-500/20 text-cream-500 gap-3 text-2xl',
             },
             size: {
                 default: 'h-10 px-4 py-2',
@@ -44,7 +46,7 @@ const buttonVariants = cva(
 
 export interface ButtonProps
     extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {
+        VariantProps<typeof buttonVariants> {
     asChild?: boolean;
 }
 

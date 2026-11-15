@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import getWebsocketToken from '@/api/server/getWebsocketToken';
 import Spinner from '@/components/elements/Spinner';
 import FadeTransition from '@/components/elements/transitions/FadeTransition';
+import { useTranslation } from '@/i18n/I18nProvider';
 import { Websocket } from '@/plugins/Websocket';
 import { ServerContext } from '@/state/server';
 
 const reconnectErrors = ['jwt: exp claim is invalid', 'jwt: created too far in past (denylist)'];
 
 function WebsocketHandler() {
+    const { t } = useTranslation();
     let updatingToken = false;
     const [error, setError] = useState<'connecting' | string>('');
     const { connected, instance } = ServerContext.useStoreState((state) => state.socket);
@@ -45,7 +47,13 @@ function WebsocketHandler() {
             setError('connecting');
             setConnectionState(false);
         });
-        socket.on('SOCKET_RECONNECT', () => setConnectionState(false));
+        socket.on('SOCKET_RECONNECT', () => {
+            setConnectionState(false);
+            // The token that got us here may have just expired (it is only valid
+            // for 10 minutes), so fetch a fresh one during the backoff window.
+            // It is applied on the next open rather than sent to the dead socket.
+            updateToken(uuid, socket);
+        });
         socket.on('status', (status) => setServerStatus(status));
 
         socket.on('daemon error', (message) => {
@@ -61,9 +69,7 @@ function WebsocketHandler() {
             if (reconnectErrors.find((v) => error.toLowerCase().indexOf(v) >= 0)) {
                 updateToken(uuid, socket);
             } else {
-                setError(
-                    'There was an error validating the credentials provided for the websocket. Please refresh the page.',
-                );
+                setError(t('server.websocket.credentials_error'));
             }
         });
 
@@ -127,7 +133,7 @@ function WebsocketHandler() {
         let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
         const attemptReconnect = () => {
             if (reconnectTimer) clearTimeout(reconnectTimer);
-            reconnectTimer = window.setTimeout(() => {
+            reconnectTimer = setTimeout(() => {
                 const socket = instanceRef.current;
                 // Reconnect if the store thinks we're disconnected, OR if the
                 // socket is actually dead but `connected` went stale (mobile
@@ -142,12 +148,19 @@ function WebsocketHandler() {
         const onVisibility = () => {
             if (document.visibilityState === 'visible') attemptReconnect();
         };
+        // Restoring a page from the back/forward cache keeps the DOM but the
+        // websocket is long gone, so reconnect as well.
+        const onPageShow = (event: PageTransitionEvent) => {
+            if (event.persisted) attemptReconnect();
+        };
 
         document.addEventListener('visibilitychange', onVisibility);
         window.addEventListener('online', attemptReconnect);
+        window.addEventListener('pageshow', onPageShow);
         return () => {
             document.removeEventListener('visibilitychange', onVisibility);
             window.removeEventListener('online', attemptReconnect);
+            window.removeEventListener('pageshow', onPageShow);
             if (reconnectTimer) clearTimeout(reconnectTimer);
         };
     }, [setConnectionState]);
@@ -160,9 +173,7 @@ function WebsocketHandler() {
                 {error === 'connecting' ? (
                     <>
                         <Spinner size={'small'} />
-                        <p className={`ml-2 text-sm text-red-100`}>
-                            We&apos;re having some trouble connecting to your server, please wait...
-                        </p>
+                        <p className={`ml-2 text-sm text-red-100`}>{t('server.websocket.connecting')}</p>
                     </>
                 ) : (
                     <p className={`ml-2 text-sm text-white`}>{error}</p>

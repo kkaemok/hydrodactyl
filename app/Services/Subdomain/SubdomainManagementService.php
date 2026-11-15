@@ -41,18 +41,17 @@ class SubdomainManagementService
         // Check if server supports subdomains
         $feature = $this->getServerSubdomainFeature($server);
         if (!$feature) {
-            throw new \Exception('Server does not support subdomains.');
+            throw new \Exception(__('exceptions.subdomains.unsupported'));
         }
 
         // Validate subdomain
         $this->validateSubdomain($subdomain, $feature, $domain);
-        $dnsRecord = $this->createDnsRecord($subdomain, $domain);
 
         // Get DNS provider
         try {
             $dnsProvider = $this->getDnsProvider($domain);
         } catch (\Exception $e) {
-            throw new \Exception('DNS service temporarily unavailable.');
+            throw new \Exception(__('exceptions.subdomains.dns_unavailable'));
         }
 
         // Get DNS records to create
@@ -72,7 +71,7 @@ class SubdomainManagementService
                 ->first();
 
             if ($existingServerSubdomain) {
-                throw new \Exception('Server already has an active subdomain. Please delete it first.');
+                throw new \Exception(__('exceptions.subdomains.already_active'));
             }
 
             // Double-check subdomain availability within transaction
@@ -82,7 +81,7 @@ class SubdomainManagementService
                 ->first();
 
             if ($existing) {
-                throw new \Exception('Subdomain is not available.');
+                throw new \Exception(__('exceptions.subdomains.not_available'));
             }
 
             // Create DNS records first
@@ -138,13 +137,13 @@ class SubdomainManagementService
 
         $feature = $this->getServerSubdomainFeature($server);
         if (!$feature) {
-            throw new \Exception('Server no longer supports subdomains.');
+            throw new \Exception(__('exceptions.subdomains.no_longer_supported'));
         }
 
         try {
             $dnsProvider = $this->getDnsProvider($domain);
         } catch (\Exception $e) {
-            throw new \Exception('DNS service temporarily unavailable.');
+            throw new \Exception(__('exceptions.subdomains.dns_unavailable'));
         }
 
         $newDnsRecords = $feature->getDnsRecords($server, $serverSubdomain->subdomain, $domain->name);
@@ -202,7 +201,7 @@ class SubdomainManagementService
             } catch (\Exception $e) {
                 // Attempt rollback of DNS changes
                 $this->rollbackDnsChanges($dnsProvider, $domain->name, $rollbackData, $updatedRecordIds);
-                throw new \Exception('Failed to update subdomain DNS records.');
+                throw new \Exception(__('exceptions.subdomains.update_failed'));
             }
         });
     }
@@ -248,7 +247,7 @@ class SubdomainManagementService
                 $serverSubdomain->delete();
             } catch (\Exception $e) {
                 Log::error("Failed to delete subdomain {$serverSubdomain->full_domain}: {$e->getMessage()}");
-                throw new \Exception('Failed to delete subdomain completely.');
+                throw new \Exception(__('exceptions.subdomains.delete_failed'));
             }
         });
     }
@@ -290,21 +289,21 @@ class SubdomainManagementService
         if (in_array($subdomain, $this->getReservedSubdomains())) {
             return [
                 'available' => false,
-                'message' => 'This subdomain is reserved and cannot be used.',
+                'message' => __('exceptions.subdomains.reserved'),
             ];
         }
 
         if (empty($subdomain)) {
             return [
                 'available' => false,
-                'message' => 'Subdomain cannot be empty.',
+                'message' => __('exceptions.subdomains.empty'),
             ];
         }
 
         if (strlen($subdomain) > 63) {
             return [
                 'available' => false,
-                'message' => 'Subdomain cannot be longer than 63 characters.',
+                'message' => __('exceptions.subdomains.too_long'),
             ];
         }
 
@@ -312,14 +311,14 @@ class SubdomainManagementService
         if (!preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/', $subdomain)) {
             return [
                 'available' => false,
-                'message' => 'Subdomain contains invalid characters.',
+                'message' => __('exceptions.subdomains.invalid_characters'),
             ];
         }
 
         if (preg_match('/[<>"\']/', $subdomain)) {
             return [
                 'available' => false,
-                'message' => 'Subdomain contains invalid characters.',
+                'message' => __('exceptions.subdomains.invalid_characters'),
             ];
         }
 
@@ -335,7 +334,7 @@ class SubdomainManagementService
 
         return [
             'available' => !$existing,
-            'message' => $existing ? 'Subdomain is not available.' : 'Subdomain is available.',
+            'message' => $existing ? __('exceptions.subdomains.not_available') : __('exceptions.subdomains.available'),
         ];
     }
 
@@ -566,7 +565,7 @@ class SubdomainManagementService
         $providerName = $domain->dns_provider;
 
         if (!isset($this->dnsProviders[$providerName])) {
-            throw new \Exception("Unsupported DNS provider: {$providerName}");
+            throw new \Exception(__('exceptions.subdomains.unsupported_provider', ['provider' => $providerName]));
         }
 
         $providerClass = $this->dnsProviders[$providerName];
@@ -622,33 +621,39 @@ class SubdomainManagementService
     }
 
     /**
-     * Normalize IP addresses in DNS records (convert localhost to 127.0.0.1).
-     * Or if using ip_aliases convert to the correct ip
+     * Resolve the advertised address for DNS A records.
+     *
+     * The allocation's IP is its internal bind address. A configured IPv4
+     * allocation alias is the address that should be advertised publicly,
+     * regardless of the node's legacy trust_alias display setting.
      *
      * @param array $dnsRecords
      * @return array
      */
-    private function normalizeIpAddresses(array $dnsRecords, server $server): array
+    private function normalizeIpAddresses(array $dnsRecords, Server $server): array
     {
-        $useAlias = (bool) $server->node->trust_alias;
         $allocationIp = $server->allocation->ip;
-        $allocationAlias = $server->allocation->ip_alias;
+        $allocationAlias = trim((string) ($server->allocation->ip_alias ?? ''));
+
+        // An A record cannot contain a hostname or IPv6 address. Reject it
+        // instead of silently publishing a private bind IP to public DNS.
+        if ($allocationAlias !== '' && filter_var($allocationAlias, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+            throw new \InvalidArgumentException('Primary allocation alias must be an IPv4 address for DNS A records.');
+        }
+
+        $dnsIp = $allocationAlias !== '' ? $allocationAlias : $allocationIp;
+        if (strtolower($dnsIp) === 'localhost') {
+            $dnsIp = '127.0.0.1';
+        }
 
         foreach ($dnsRecords as &$record) {
             if (($record['type'] ?? null) !== 'A' || !array_key_exists('content', $record)) {
                 continue;
             }
 
-            if ($useAlias) {
-                $record['content'] = !empty($allocationAlias) ? $allocationAlias : $allocationIp;
-                continue;
-            }
-
-            // Convert localhost to 127.0.0.1 for A records
-            if (strtolower($record['content']) === 'localhost') {
-                $record['content'] = '127.0.0.1';
-            }
+            $record['content'] = $dnsIp;
         }
+        unset($record);
 
         return $dnsRecords;
     }

@@ -1,6 +1,6 @@
-import debounce from 'debounce';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useDebouncedCallback } from 'use-debounce';
 import { httpErrorToHuman } from '@/api/http';
 import type { FileObject } from '@/api/server/files/loadDirectory';
 import Can from '@/components/elements/Can';
@@ -17,6 +17,7 @@ import NewDirectoryButton from '@/components/server/files/NewDirectoryButton';
 import UploadButton from '@/components/server/files/UploadButton';
 import ServerHeader from '@/components/server/header/ServerHeader';
 import { hashToPath } from '@/helpers';
+import { useTranslation } from '@/i18n/I18nProvider';
 import useFileManagerSwr from '@/plugins/useFileManagerSwr';
 import { useStoreActions } from '@/state/hooks';
 import { ServerContext } from '@/state/server';
@@ -24,13 +25,14 @@ import { ServerContext } from '@/state/server';
 import NewFileButton from './NewFileButton';
 
 const sortFiles = (files: FileObject[]): FileObject[] => {
-    const sortedFiles: FileObject[] = files
+    const sortedFiles: FileObject[] = [...files]
         .sort((a, b) => a.name.localeCompare(b.name))
         .sort((a, b) => (a.isFile === b.isFile ? 0 : a.isFile ? 1 : -1));
     return sortedFiles.filter((file, index) => index === 0 || file.name !== sortedFiles[index - 1]?.name);
 };
 
 const FileManagerContainer = () => {
+    const { t } = useTranslation();
     const id = ServerContext.useStoreState((state) => state.server.data?.id);
 
     const { hash } = useLocation();
@@ -56,7 +58,6 @@ const FileManagerContainer = () => {
     }, [mutate]);
 
     const onSelectAllClick = () => {
-        console.log('files', files);
         setSelectedFiles(
             selectedFilesLength === (files?.length === 0 ? -1 : files?.length)
                 ? []
@@ -65,10 +66,12 @@ const FileManagerContainer = () => {
     };
 
     const [searchTerm, setSearchTerm] = useState('');
-    const debouncedSearchTerm = debounce(setSearchTerm, 50);
+    const debouncedSearchTerm = useDebouncedCallback((value: string) => setSearchTerm(value), 50);
 
-    const filesArray = sortFiles(files ?? []).filter((file) =>
-        file.name.toLowerCase().includes(searchTerm.toLowerCase()),
+    const normalizedSearchTerm = searchTerm.toLowerCase();
+    const filesArray = useMemo(
+        () => sortFiles(files ?? []).filter((file) => file.name.toLowerCase().includes(normalizedSearchTerm)),
+        [files, normalizedSearchTerm],
     );
 
     useEffect(() => {
@@ -78,14 +81,14 @@ const FileManagerContainer = () => {
         if (searchInputRef.current) {
             searchInputRef.current.value = '';
         }
-    }, []);
+    }, [hash]);
 
     if (error) {
-        return <ServerError title={'Something went wrong.'} message={httpErrorToHuman(error)} />;
+        return <ServerError title={t('server.files.error_title')} message={httpErrorToHuman(error)} />;
     }
 
     return (
-        <ServerContentBlock className='p-0!' title={'File Manager'} showFlashKey={'files'}>
+        <ServerContentBlock className='p-0!' title={t('server.files.title')} showFlashKey={'files'}>
             <div className='px-2 sm:px-14 pt-2 h-fit sm:pt-14'>
                 <ErrorBoundary>
                     <ServerHeader />
@@ -113,7 +116,7 @@ const FileManagerContainer = () => {
                 </ErrorBoundary>
             </div>
             {!files ? null : !files.length ? (
-                <p className={`text-sm text-zinc-400 text-center`}>This folder is empty.</p>
+                <p className={`text-sm text-zinc-400 text-center`}>{t('server.files.empty')}</p>
             ) : (
                 <>
                     <div className='relative p-1 border-[1px] border-[#ffffff12] rounded-md sm:ml-12 sm:mr-12 mx-2'>
@@ -139,7 +142,7 @@ const FileManagerContainer = () => {
                             ref={searchInputRef}
                             className='pl-14 py-4 w-full rounded-lg bg-[#ffffff11] text-sm font-bold outline-none'
                             type='text'
-                            placeholder='Search...'
+                            placeholder={t('server.files.search_placeholder')}
                             onChange={(event) => debouncedSearchTerm(event.target.value)}
                         />
                     </div>

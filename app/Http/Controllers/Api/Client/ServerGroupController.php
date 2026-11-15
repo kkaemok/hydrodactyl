@@ -16,7 +16,7 @@ class ServerGroupController extends ClientApiController
     private function ensureGroupsEnabled(): void
     {
         if (!config('pterodactyl.client_features.groups.enabled', true)) {
-            throw new NotFoundHttpException('Server groups are not enabled on this panel.');
+            throw new NotFoundHttpException(__('exceptions.client.server_groups.disabled'));
         }
     }
 
@@ -124,7 +124,7 @@ class ServerGroupController extends ClientApiController
 
             if ($exists) {
                 throw ValidationException::withMessages([
-                    'name' => ['A group with this name already exists.'],
+                    'name' => [__('exceptions.client.server_groups.name_exists')],
                 ]);
             }
         }
@@ -253,12 +253,12 @@ class ServerGroupController extends ClientApiController
      */
     private function validateServerAccess($user, array $serverIds): void
     {
-        $accessible = $user->accessibleServers()->pluck('servers.id')->toArray();
+        $accessible = $user->accessibleServers()->whereIn('servers.id', $serverIds)->pluck('servers.id')->all();
         $unauthorized = array_diff($serverIds, $accessible);
 
         if (!empty($unauthorized)) {
             throw ValidationException::withMessages([
-                'server_ids' => ['You do not have access to one or more of the specified servers.'],
+                'server_ids' => [__('exceptions.client.server_groups.server_access')],
             ]);
         }
     }

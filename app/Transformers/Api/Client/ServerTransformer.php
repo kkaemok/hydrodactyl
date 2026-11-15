@@ -53,6 +53,8 @@ class ServerTransformer extends BaseClientTransformer
                 'port' => $server->node->SFTPAliasPort
             ],
             'description' => $server->description,
+            'webhook_type' => $server->webhook_type,
+            'webhook_url' => $server->webhook_url,
             'limits' => [
                 'memory' => $server->memory,
                 'overhead_memory' => $server->overhead_memory,
@@ -79,6 +81,7 @@ class ServerTransformer extends BaseClientTransformer
             // This field is deprecated, please use "status".
             'is_installing' => !$server->isInstalled(),
             'is_transferring' => !is_null($server->transfer),
+            'software_enabled' => is_null($server->software_enabled) ? true : (bool) $server->software_enabled,
             'daemon_type' => $server->node->daemonType,
             'backup_disk' => $server->node->backupDisk,
             'groups' => $server->group ? [
