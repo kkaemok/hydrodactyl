@@ -55,5 +55,8 @@ export const createUser = (values: UserValues): Promise<AdminUser> =>
 export const updateUser = (id: number | string, values: UserValues): Promise<AdminUser> =>
     http.patch(`/admin/api/users/${id}`, values).then(({ data }) => data);
 
+export const sendUserPasswordReset = (id: number | string): Promise<void> =>
+    http.post(`/admin/api/users/${id}/password-reset`).then(() => undefined);
+
 export const deleteUser = (id: number | string): Promise<void> =>
     http.delete(`/admin/api/users/${id}`).then(() => undefined);

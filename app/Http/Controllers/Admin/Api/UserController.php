@@ -6,6 +6,8 @@ use Pterodactyl\Models\User;
 use Pterodactyl\Models\Subuser;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Contracts\Auth\PasswordBroker;
+use Pterodactyl\Notifications\SendPasswordReset;
 use Spatie\QueryBuilder\QueryBuilder;
 use Spatie\QueryBuilder\AllowedFilter;
 use Spatie\QueryBuilder\AllowedSort;
@@ -28,6 +30,7 @@ class UserController extends Controller
      */
     public function __construct(
         private UserCreationService $creationService,
+        private PasswordBroker $passwordBroker,
         private UserUpdateService $updateService,
         private UserDeletionService $deletionService,
         private Translator $translator,
@@ -131,6 +134,21 @@ class UserController extends Controller
         $user = $this->creationService->handle($request->normalize());
 
         return response()->json($this->transform($user), JsonResponse::HTTP_CREATED);
+    }
+
+    /**
+     * Queue a new password setup/reset email for a user.
+     *
+     * This is deliberately a password reset, not an unauthenticated first-login
+     * shortcut. Creating a new token invalidates any previous setup link.
+     */
+    public function sendPasswordReset(User $user): JsonResponse
+    {
+        $token = $this->passwordBroker->createToken($user);
+
+        $user->notify(new SendPasswordReset($token));
+
+        return response()->json(['status' => 'queued'], JsonResponse::HTTP_ACCEPTED);
     }
 
     /**

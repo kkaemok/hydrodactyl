@@ -23,7 +23,7 @@ const UserCreateContainer = () => {
 
         try {
             const user = await createUser(values);
-            toast.success(t('admin.users.created'));
+            toast.success(t(values.password.trim() === '' ? 'admin.users.created_invite_queued' : 'admin.users.created'));
             navigate(`/users/${user.id}`);
         } catch (error) {
             setErrors(parseValidationErrors(error));
