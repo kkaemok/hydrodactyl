@@ -45,6 +45,9 @@ Route::group(['prefix' => 'api'], function () {
         Route::get('/languages', [Admin\Api\UserController::class, 'languages'])->name('admin.api.users.languages');
         Route::get('/{user:id}', [Admin\Api\UserController::class, 'view'])->name('admin.api.users.view');
         Route::post('/', [Admin\Api\UserController::class, 'store'])->name('admin.api.users.store');
+        Route::post('/{user:id}/password-reset', [Admin\Api\UserController::class, 'sendPasswordReset'])
+            ->middleware('throttle:5,1')
+            ->name('admin.api.users.password-reset');
         Route::patch('/{user:id}', [Admin\Api\UserController::class, 'update'])->name('admin.api.users.update');
         Route::delete('/{user:id}', [Admin\Api\UserController::class, 'destroy'])->name('admin.api.users.destroy');
     });

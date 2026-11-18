@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { errorToMessage, parseValidationErrors } from '@/api/admin/errors';
 import { useLanguages } from '@/api/admin/useLanguages';
-import { deleteUser, type UserValues, updateUser } from '@/api/admin/users';
+import { deleteUser, sendUserPasswordReset, type UserValues, updateUser } from '@/api/admin/users';
 import { useUser } from '@/api/admin/useUsers';
 import { Dialog } from '@/components/elements/dialog';
 import { MainPageHeader } from '@/components/elements/MainPageHeader';
@@ -21,6 +21,7 @@ const UserViewContainer = () => {
     const { data: languages } = useLanguages();
     const [submitting, setSubmitting] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [sendingReset, setSendingReset] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -62,6 +63,19 @@ const UserViewContainer = () => {
         }
     };
 
+    const handleSendPasswordReset = async () => {
+        setSendingReset(true);
+
+        try {
+            await sendUserPasswordReset(user.id);
+            toast.success(t('admin.users.password_reset_queued'));
+        } catch (error) {
+            toast.error(errorToMessage(error, t('admin.users.password_reset_failed')));
+        } finally {
+            setSendingReset(false);
+        }
+    };
+
     const name = [user.name_first, user.name_last].filter(Boolean).join(' ') || user.username;
 
     return (
@@ -86,6 +100,20 @@ const UserViewContainer = () => {
                 onSubmit={handleSubmit}
                 onCancel={() => navigate('/users')}
             />
+
+            <div className='mt-6 rounded-xl border border-mocha-400 bg-mocha-500 p-4'>
+                <h2 className='text-sm font-semibold text-cream-50'>{t('admin.users.password_reset_title')}</h2>
+                <p className='mt-1 text-sm text-cream-400/70'>{t('admin.users.password_reset_description')}</p>
+                <Button
+                    type='button'
+                    variant='secondary'
+                    className='mt-3'
+                    disabled={sendingReset}
+                    onClick={() => void handleSendPasswordReset()}
+                >
+                    {t('admin.users.password_reset_send')}
+                </Button>
+            </div>
 
             <div className='mt-6 rounded-xl border border-brand-400/40 bg-brand-400/5 p-4'>
                 <h2 className='text-sm font-semibold text-brand-400'>{t('admin.users.delete')}</h2>

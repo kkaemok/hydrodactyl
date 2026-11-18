@@ -87,7 +87,7 @@ const UserForm = ({ languages, initialValues, errors = {}, submitting, submitLab
                     <Field
                         label={t('admin.users.password')}
                         error={errors.password}
-                        hint={t('admin.users.password_hint')}
+                        hint={t(initialValues ? 'admin.users.password_hint_existing' : 'admin.users.password_hint_new')}
                     >
                         <Input.Text
                             type='password'
